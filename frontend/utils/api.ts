@@ -35,12 +35,20 @@ export const usersAPI = {
     api.post(`/users/update-location/${userId}`, { latitude, longitude }),
   getNearbyProfessionals: async (
     userType: string,
-    params?: { latitude?: number; longitude?: number; radius?: number }
-  ) => api.get(`/users/nearby/professionals/${userType}`, { params }),
-  getNearbyAmbulances: async (params?: { latitude?: number; longitude?: number; radius?: number }) =>
-    api.get('/users/nearby/ambulances', { params }),
-  getNearbyVolunteers: async (params?: { latitude?: number; longitude?: number; radius?: number }) =>
-    api.get('/users/nearby/volunteers', { params }),
+    latitude: number,
+    longitude: number,
+    radius: number = 10
+  ) => api.get(`/users/nearby/professionals/${userType}`, { params: { latitude, longitude, radius } }),
+  getNearbyAmbulances: async (
+    latitude: number,
+    longitude: number,
+    radius: number = 10
+  ) => api.get('/users/nearby/ambulances', { params: { latitude, longitude, radius } }),
+  getNearbyVolunteers: async (
+    latitude: number,
+    longitude: number,
+    radius: number = 10
+  ) => api.get('/users/nearby/volunteers', { params: { latitude, longitude, radius } }),
   // Profile & Documents
   uploadDocument: async (userId: string, documentData: FormData) =>
     api.post(`/users/${userId}/documents`, documentData, {
