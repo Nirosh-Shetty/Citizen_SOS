@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { appointmentsAPI } from '../../utils/api';
+import { Alert } from 'react-native';
 
 interface Appointment {
   _id: string;
@@ -43,6 +44,29 @@ export default function AppointmentsScreen() {
       console.error('Error fetching appointments:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    try {
+      await appointmentsAPI.cancelAppointment(id);
+      await fetchAppointments();
+      Alert.alert('Cancelled', 'Appointment has been cancelled');
+    } catch (e) {
+      Alert.alert('Error', 'Failed to cancel appointment');
+    }
+  };
+
+  const handleReschedule = async (item: Appointment) => {
+    // Simple reschedule to +1 day same time for demo; replace with a picker UI if needed
+    try {
+      const current = new Date(item.appointmentDate);
+      const next = new Date(current.getTime() + 24 * 60 * 60 * 1000);
+      await appointmentsAPI.rescheduleAppointment(item._id, next.toISOString(), item.timeSlot);
+      await fetchAppointments();
+      Alert.alert('Rescheduled', `Moved to ${next.toLocaleDateString()} ${item.timeSlot}`);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to reschedule appointment');
     }
   };
 
@@ -96,10 +120,10 @@ export default function AppointmentsScreen() {
                 </View>
 
                 <View style={styles.appointmentActions}>
-                  <TouchableOpacity style={styles.actionButton}>
+                  <TouchableOpacity style={styles.actionButton} onPress={() => handleReschedule(item)}>
                     <Text style={styles.actionButtonText}>Reschedule</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionButton, styles.cancelButton]}>
+                  <TouchableOpacity style={[styles.actionButton, styles.cancelButton]} onPress={() => handleCancel(item._id)}>
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
                 </View>
