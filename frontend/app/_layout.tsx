@@ -9,6 +9,8 @@ import { useRouter } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { storageService } from '../utils/storage';
 
+
+
 function RootContent() {
   const colorScheme = useColorScheme();
   const router = useRouter();

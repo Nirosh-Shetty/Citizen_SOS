@@ -7,33 +7,36 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
-  ActivityIndicator,
-  Dimensions,
-  Animated,
-  Image,
-  ImageBackground,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import io from 'socket.io-client';
+import { MaterialIcons, AntDesign, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { emergencyAPI, usersAPI, appointmentsAPI } from '../../utils/api';
-import io from 'socket.io-client';
-import { MaterialIcons, FontAwesome5, AntDesign } from '@expo/vector-icons';
-import GoogleMap from '../../components/GoogleMap';
+import { logSystemInfo } from '../../utils/systemInfo';
 import ModernButton from '../../components/ModernButton';
-import ResponsiveCard from '../../components/ResponsiveCard';
+import { AppointmentsList } from '../../components/AppointmentCard';
+import { SOSButton } from '../../components/SOSButton';
+import { Colors } from '../../constants/theme';
 
 const SOCKET_URL = 'http://localhost:5000';
-const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
   const router = useRouter();
   const { user, updateLocation } = useAuth();
+  const colorScheme = useColorScheme();
+  const colors = colorScheme === 'dark' ? Colors.dark : Colors.light;
+
   const [location, setLocation] = useState<any>(null);
-  const [loadingEmergency, setLoadingEmergency] = useState(false);
+  const [, setLoadingEmergency] = useState(false);
   const [sosActive, setSosActive] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [nearbyData, setNearbyData] = useState<{
-    doctors: Array<{ id: string; name: string; distance?: number; [key: string]: any }> ;
+    doctors: Array<{ id: string; name: string; distance?: number; [key: string]: any }>;
     nurses: Array<{ id: string; name: string; distance?: number; [key: string]: any }>;
     ambulances: Array<{ id: string; name: string; distance?: number; [key: string]: any }>;
     volunteers: Array<{ id: string; name: string; distance?: number; [key: string]: any }>;
@@ -46,14 +49,49 @@ export default function HomeScreen() {
   const [upcomingAppointments, setUpcomingAppointments] = useState<Array<any>>([]);
   const socketRef = useRef<any>(null);
 
-  // SOS Animation Refs
-  const sosScaleAnim = useRef(new Animated.Value(1)).current;
-  const sosPulseAnim = useRef(new Animated.Value(1)).current;
-  const sosRipple1Anim = useRef(new Animated.Value(0)).current;
-  const sosRipple2Anim = useRef(new Animated.Value(0)).current;
+  const services = [
+    {
+      id: 'doctor',
+      title: 'Doctor',
+      subtitle: 'Consult Specialist',
+      icon: 'stethoscope',
+      color: 'rgba(91,149,255,0.12)',
+      accent: colors.primary,
+      target: '/appointments/book',
+    },
+    {
+      id: 'nurse',
+      title: 'Nurse',
+      subtitle: 'Home Care',
+      icon: 'account-heart',
+      color: 'rgba(16,185,129,0.12)',
+      accent: colors.secondary,
+      target: '/appointments/book',
+    },
+    {
+      id: 'ambulance',
+      title: 'Ambulance',
+      subtitle: 'Emergency 24/7',
+      icon: 'ambulance',
+      color: 'rgba(244,67,54,0.12)',
+      accent: '#F44336',
+      target: '/ambulance/book',
+    },
+    {
+      id: 'bookings',
+      title: 'Bookings',
+      subtitle: 'History & Status',
+      icon: 'calendar-month',
+      color: 'rgba(111,66,193,0.12)',
+      accent: '#6F42C1',
+      target: '/appointments',
+    },
+  ];
 
   useEffect(() => {
+    logSystemInfo();
     initializeLocation();
+
     if (user?.id) {
       fetchNearbyServices();
       fetchUpcomingAppointments();
@@ -68,28 +106,6 @@ export default function HomeScreen() {
       socketRef.current?.disconnect();
     };
   }, [user?.id]);
-
-  // SOS Pulse animation
-  useEffect(() => {
-    if (sosActive) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(sosPulseAnim, {
-            toValue: 1.1,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-          Animated.timing(sosPulseAnim, {
-            toValue: 1,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      pulse.start();
-      return () => pulse.stop();
-    }
-  }, [sosActive]);
 
   const initializeLocation = async () => {
     try {
@@ -114,7 +130,7 @@ export default function HomeScreen() {
           timeInterval: 10000,
           distanceInterval: 50,
         },
-        (newLocation) => {
+        (newLocation: any) => {
           setLocation(newLocation.coords);
           if (user?.id) {
             updateLocation(newLocation.coords.latitude, newLocation.coords.longitude);
@@ -127,15 +143,18 @@ export default function HomeScreen() {
   };
 
   const fetchNearbyServices = async () => {
-    if (!location) return;
+    if (!location) {
+      const fallbackLocation = { latitude: 28.7041, longitude: 77.1025 };
+      setLocation(fallbackLocation);
+      return;
+    }
 
     try {
       const [doctors, nurses, ambulances, volunteers] = await Promise.all([
         usersAPI.getNearbyProfessionals('doctor', location.latitude, location.longitude, 10),
         usersAPI.getNearbyProfessionals('nurse', location.latitude, location.longitude, 10),
         usersAPI.getNearbyAmbulances(location.latitude, location.longitude, 10),
-        usersAPI.getNearbyVolunteers?.(location.latitude, location.longitude, 10)
-          .catch(() => ({ data: [] })),
+        usersAPI.getNearbyVolunteers(location.latitude, location.longitude, 10).catch(() => ({ data: [] })),
       ]);
 
       setNearbyData({
@@ -149,6 +168,15 @@ export default function HomeScreen() {
     }
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      fetchNearbyServices(),
+      fetchUpcomingAppointments(),
+    ]);
+    setRefreshing(false);
+  };
+
   const fetchUpcomingAppointments = async () => {
     try {
       if (user?.id) {
@@ -160,49 +188,6 @@ export default function HomeScreen() {
     }
   };
 
-  const triggerSOSAnimation = () => {
-    // Scale animation
-    Animated.sequence([
-      Animated.timing(sosScaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sosScaleAnim, {
-        toValue: 1.05,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sosScaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    // Ripple animations
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(sosRipple1Anim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.sequence([
-        Animated.delay(200),
-        Animated.timing(sosRipple2Anim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start(() => {
-      sosRipple1Anim.setValue(0);
-      sosRipple2Anim.setValue(0);
-    });
-  };
-
   const handleSOS = async () => {
     if (!location) {
       Alert.alert('Error', 'Location not available. Please enable location services.');
@@ -211,7 +196,6 @@ export default function HomeScreen() {
 
     setLoadingEmergency(true);
     setSosActive(true);
-    triggerSOSAnimation();
 
     try {
       const emergencyContacts = user?.emergencyContacts || [];
@@ -223,7 +207,6 @@ export default function HomeScreen() {
         severity: 'critical',
       });
 
-      // Notify emergency contacts
       socketRef.current?.emit('emergency-alert', {
         victimId: user?.id,
         victimName: user?.name,
@@ -234,7 +217,6 @@ export default function HomeScreen() {
         liveTracking: true,
       });
 
-      // Notify volunteers and nearby professionals
       socketRef.current?.emit('volunteer-alert', {
         victimId: user?.id,
         victimName: user?.name,
@@ -243,10 +225,8 @@ export default function HomeScreen() {
         severity: 'critical',
       });
 
-      // Fetch nearby responders
       await fetchNearbyServices();
 
-      // Navigate to emergency tracking with nearby options
       router.push({
         pathname: '/emergency/tracking',
         params: {
@@ -264,198 +244,178 @@ export default function HomeScreen() {
     }
   };
 
-  const RippleComponent = ({ animatedValue }: any) => {
-    const rippleOpacity = animatedValue.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.5, 0],
-    });
-
-    const rippleScale = animatedValue.interpolate({
-      inputRange: [0, 1],
-      outputRange: [1, 3],
-    });
-
-    return (
-      <Animated.View
-        style={[
-          styles.ripple,
-          {
-            opacity: rippleOpacity,
-            transform: [{ scale: rippleScale }],
-          },
-        ]}
-      />
-    );
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
       >
-        {/* Header Section */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Welcome back</Text>
-            <Text style={styles.userName}>{user?.name || 'User'}</Text>
+            <Text style={[styles.greeting, { color: colors.icon }]}>Hello,</Text>
+            <Text style={[styles.userName, { color: colors.text }]}>
+              {user?.name || 'New'}
+            </Text>
+            <Text style={[styles.subGreeting, { color: colors.icon }]}>How are you feeling today?</Text>
           </View>
           <TouchableOpacity
-            style={styles.profileButton}
+            style={[styles.profileButton, { borderColor: colors.cardBorder }]}
             onPress={() => router.push('/profile')}
+            activeOpacity={0.85}
           >
-            <MaterialIcons name="person" size={24} color="#fff" />
+            <Text style={[styles.profileInitial, { color: colors.text }]}>{(user?.name || 'N').charAt(0)}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* SOS Button Section */}
-        <View style={styles.sosContainer}>
-          <View style={styles.sosBackground}>
-            <RippleComponent animatedValue={sosRipple1Anim} />
-            <RippleComponent animatedValue={sosRipple2Anim} />
+        <LinearGradient
+          colors={[colors.gradientStart, colors.gradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
+        >
+          <View style={styles.heroBadge}>
+            <Text style={styles.heroBadgeText}>Early Protection</Text>
+          </View>
+          <Text style={styles.heroTitle}>Health Checkup</Text>
+          <Text style={styles.heroSubtitle}>
+            Regular checkups can help identify issues before they become serious.
+          </Text>
+          <ModernButton
+            title="Book Now"
+            onPress={() => router.push('/appointments/book')}
+            variant="secondary"
+            size="large"
+            style={styles.heroButton}
+            fullWidth
+          />
+        </LinearGradient>
 
-            <Animated.View
-              style={[
-                styles.sosButton,
-                {
-                  transform: [{ scale: sosScaleAnim }, { scale: sosPulseAnim }],
-                },
-              ]}
-            >
+        <View style={styles.servicesSection}>
+          <Text style={[styles.servicesTitle, { color: colors.text }]}>Our Services</Text>
+          <View style={styles.servicesGrid}>
+            {services.map((service) => (
               <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={handleSOS}
-                disabled={loadingEmergency}
+                key={service.id}
+                style={[styles.serviceCard, { backgroundColor: colors.background, shadowColor: service.accent }]}
+                activeOpacity={0.85}
+                onPress={() => router.push(service.target)}
               >
-                {loadingEmergency ? (
-                  <ActivityIndicator
-                    color="#fff"
-                    size="large"
-                    style={styles.sosLoading}
-                  />
-                ) : (
-                  <>
-                    <Text style={styles.sosIcon}>🆘</Text>
-                    <Text style={styles.sosText}>SOS</Text>
-                    {sosActive && (
-                      <Text style={styles.sosStatus}>Emergency Active</Text>
-                    )}
-                  </>
-                )}
+                <View style={[styles.serviceIconWrap, { backgroundColor: service.color }]}>
+                  <MaterialCommunityIcons name={service.icon as any} size={28} color={service.accent} />
+                </View>
+                <Text style={[styles.serviceTitle, { color: colors.text }]}>{service.title}</Text>
+                <Text style={[styles.serviceSubtitle, { color: colors.icon }]}>{service.subtitle}</Text>
               </TouchableOpacity>
-            </Animated.View>
-          </View>
-
-          <View style={styles.sosInfo}>
-            <Text style={styles.sosInfoText}>
-              Press and hold SOS button for immediate emergency response
-            </Text>
-            <Text style={styles.sosInfoSubText}>
-              Ambulance, doctors, and emergency contacts will be notified with your live location
-            </Text>
+            ))}
           </View>
         </View>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActionsContainer}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActions}>
+        <View style={styles.quickRow}>
+          {[
+            { id: 'appointments', label: 'Appointments', icon: 'calendar-check', target: '/appointments' },
+            { id: 'emergency', label: 'Emergency', icon: 'shield-alert', target: '/emergency/tracking' },
+            { id: 'map', label: 'Nearby', icon: 'map-search', target: '/doctors/map' },
+          ].map((item) => (
             <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#EEF2FF' }]}
-              onPress={() => router.push('/appointments/book')}
+              key={item.id}
+              style={[styles.quickPill, { borderColor: colors.cardBorder, backgroundColor: colors.cardBackground }]}
+              onPress={() => router.push(item.target)}
+              activeOpacity={0.85}
             >
-              <MaterialIcons name="calendar-today" size={32} color="#5B5FFF" />
-              <Text style={styles.actionButtonLabel}>Book</Text>
-              <Text style={styles.actionButtonSub}>Appointment</Text>
+              <MaterialCommunityIcons name={item.icon as any} size={18} color={colors.primary} />
+              <Text style={[styles.quickPillText, { color: colors.text }]}>{item.label}</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#FFE5E5' }]}
-              onPress={() => router.push('/ambulance/book')}
-            >
-              <MaterialIcons name="local-hospital" size={32} color="#FF6B6B" />
-              <Text style={styles.actionButtonLabel}>Book</Text>
-              <Text style={styles.actionButtonSub}>Ambulance</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#E5F5E5' }]}
-              onPress={() => router.push('/nearby')}
-            >
-              <MaterialIcons name="location-on" size={32} color="#4CAF50" />
-              <Text style={styles.actionButtonLabel}>Find</Text>
-              <Text style={styles.actionButtonSub}>Nearby</Text>
-            </TouchableOpacity>
-          </View>
+          ))}
         </View>
 
-        {/* Upcoming Appointments */}
+        <View style={styles.sosContainer}>
+          <Text style={[styles.sosTitle, { color: colors.text }]}>Emergency SOS</Text>
+          <Text style={[styles.sosSubtitle, { color: colors.icon }]}>Press and hold for immediate help</Text>
+          <SOSButton
+            isActive={sosActive}
+            onPress={handleSOS}
+            onCancel={() => {
+              setSosActive(false);
+              socketRef.current?.emit('emergency-cancel', { victimId: user?.id });
+            }}
+            colors={{ light: colors }}
+          />
+        </View>
+
         {upcomingAppointments.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Next Appointments</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Upcoming Appointments</Text>
               <TouchableOpacity onPress={() => router.push('/appointments')}>
-                <Text style={styles.seeAll}>See All</Text>
+                <Text style={[styles.seeAll, { color: colors.primary }]}>See All</Text>
               </TouchableOpacity>
             </View>
-            {upcomingAppointments.map((appointment: any, index: number) => (
-              <View key={appointment._id || index} style={styles.appointmentCard}>
-                <View style={styles.appointmentLeft}>
-                  <View style={styles.dateCircle}>
-                    <Text style={styles.dateDay}>
-                      {new Date(appointment.appointmentDate).getDate()}
-                    </Text>
-                    <Text style={styles.dateMonth}>
-                      {new Date(appointment.appointmentDate).toLocaleString(
-                        'default',
-                        { month: 'short' }
-                      )}
-                    </Text>
-                  </View>
-                  <View style={styles.appointmentInfo}>
-                    <Text style={styles.appointmentName}>
-                      {appointment.professionalId?.name || 'Professional'}
-                    </Text>
-                    <Text style={styles.appointmentTime}>{appointment.timeSlot}</Text>
-                  </View>
-                </View>
-                <TouchableOpacity style={styles.appointmentAction}>
-                  <MaterialIcons name="navigate-next" size={24} color="#1976D2" />
-                </TouchableOpacity>
-              </View>
-            ))}
           </View>
         )}
+        {upcomingAppointments.length > 0 && (
+          <AppointmentsList
+            appointments={upcomingAppointments.map((apt: any, index: number) => ({
+              id: apt._id,
+              doctorName: apt.professionalId?.name || 'Professional',
+              specialty: apt.professionalId?.specialization || 'General Practitioner',
+              time: apt.timeSlot,
+              date: new Date(apt.appointmentDate).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+              }),
+              status: 'upcoming' as const,
+              colors: { light: colors },
+              index: index,
+            }))}
+            colors={{ light: colors }}
+            onAppointmentPress={() => {
+              router.push(`/appointments`);
+            }}
+          />
+        )}
 
-        {/* Nearby Doctors */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Nearby Doctors</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>👨‍⚕️ Nearby Doctors</Text>
             <TouchableOpacity onPress={() => router.push('/doctors/map')}>
-              <Text style={styles.seeAll}>Map View</Text>
+              <View style={styles.mapViewButton}>
+                <MaterialIcons name="map" size={16} color={colors.primary} />
+                <Text style={[styles.seeAll, { color: colors.primary }]}>Map View</Text>
+              </View>
             </TouchableOpacity>
           </View>
           {nearbyData.doctors.length > 0 ? (
             nearbyData.doctors.map((doctor: any, index: number) => (
-              <View key={doctor._id || index} style={styles.professionalCard}>
-                <View style={styles.professionalAvatar}>
+              <View
+                key={doctor._id || index}
+                style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}
+              >
+                <View style={[styles.professionalAvatar, { backgroundColor: colors.primary }]}>
                   <MaterialIcons name="person" size={32} color="#fff" />
                 </View>
                 <View style={styles.professionalInfo}>
-                  <Text style={styles.professionalName}>{doctor.name}</Text>
-                  <Text style={styles.professionalSpec}>
+                  <Text style={[styles.professionalName, { color: colors.text }]}>{doctor.name}</Text>
+                  <Text style={[styles.professionalSpec, { color: colors.icon }]}>
                     {doctor.specialization || 'General Practitioner'}
                   </Text>
                   <View style={styles.ratingContainer}>
                     <AntDesign name="star" size={12} color="#FFC107" />
-                    <Text style={styles.rating}>4.5</Text>
-                    <Text style={styles.distance}>
+                    <Text style={[styles.rating, { color: colors.text }]}>4.5</Text>
+                    <Text style={[styles.distance, { color: colors.icon }]}>
                       • {(Math.random() * 5).toFixed(1)} km away
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={styles.bookBtn}
+                  style={[styles.bookBtn, { backgroundColor: colors.primary }]}
                   onPress={() =>
                     router.push({
                       pathname: '/appointments/book',
@@ -469,36 +429,45 @@ export default function HomeScreen() {
             ))
           ) : (
             <View style={styles.emptyState}>
-              <MaterialIcons name="location-off" size={48} color="#999" />
-              <Text style={styles.emptyStateText}>No doctors nearby</Text>
+              <MaterialIcons name="location-off" size={48} color={colors.icon} />
+              <Text style={[styles.emptyStateText, { color: colors.text }]}>No doctors found nearby</Text>
+              <TouchableOpacity
+                style={[styles.refreshButton, { backgroundColor: colors.primary }]}
+                onPress={fetchNearbyServices}
+              >
+                <MaterialIcons name="refresh" size={16} color="#fff" />
+                <Text style={styles.refreshButtonText}>Refresh</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
 
-        {/* Nearby Nurses */}
         {nearbyData.nurses.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Nearby Nurses</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>👩‍⚕️ Nearby Nurses</Text>
             </View>
             {nearbyData.nurses.map((nurse: any, index: number) => (
-              <View key={nurse._id || index} style={styles.professionalCard}>
-                <View style={[styles.professionalAvatar, { backgroundColor: '#E91E63' }]}>
+              <View
+                key={nurse._id || index}
+                style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}
+              >
+                <View style={[styles.professionalAvatar, { backgroundColor: colors.danger }]}>
                   <MaterialIcons name="person" size={32} color="#fff" />
                 </View>
                 <View style={styles.professionalInfo}>
-                  <Text style={styles.professionalName}>{nurse.name}</Text>
-                  <Text style={styles.professionalSpec}>Registered Nurse</Text>
+                  <Text style={[styles.professionalName, { color: colors.text }]}>{nurse.name}</Text>
+                  <Text style={[styles.professionalSpec, { color: colors.icon }]}>Registered Nurse</Text>
                   <View style={styles.ratingContainer}>
                     <AntDesign name="star" size={12} color="#FFC107" />
-                    <Text style={styles.rating}>4.7</Text>
-                    <Text style={styles.distance}>
+                    <Text style={[styles.rating, { color: colors.text }]}>4.7</Text>
+                    <Text style={[styles.distance, { color: colors.icon }]}>
                       • {(Math.random() * 5).toFixed(1)} km away
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={styles.bookBtn}
+                  style={[styles.bookBtn, { backgroundColor: colors.danger }]}
                   onPress={() =>
                     router.push({
                       pathname: '/appointments/book',
@@ -513,26 +482,26 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Available Ambulances */}
         {nearbyData.ambulances.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Available Ambulances</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>🚑 Available Ambulances</Text>
             </View>
             {nearbyData.ambulances.map((ambulance: any, index: number) => (
-              <View key={ambulance._id || index} style={styles.professionalCard}>
+              <View
+                key={ambulance._id || index}
+                style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}
+              >
                 <View style={[styles.professionalAvatar, { backgroundColor: '#F44336' }]}>
                   <MaterialIcons name="local-hospital" size={32} color="#fff" />
                 </View>
                 <View style={styles.professionalInfo}>
-                  <Text style={styles.professionalName}>{ambulance.name}</Text>
-                  <Text style={styles.professionalSpec}>
-                    Emergency Ambulance Service
-                  </Text>
+                  <Text style={[styles.professionalName, { color: colors.text }]}>{ambulance.name}</Text>
+                  <Text style={[styles.professionalSpec, { color: colors.icon }]}>Emergency Ambulance Service</Text>
                   <View style={styles.ratingContainer}>
                     <AntDesign name="star" size={12} color="#FFC107" />
-                    <Text style={styles.rating}>4.8</Text>
-                    <Text style={styles.distance}>
+                    <Text style={[styles.rating, { color: colors.text }]}>4.8</Text>
+                    <Text style={[styles.distance, { color: colors.icon }]}>
                       • {(Math.random() * 5).toFixed(1)} km away
                     </Text>
                   </View>
@@ -548,16 +517,50 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Health Tips */}
+        {nearbyData.volunteers.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>🤝 Nearby Volunteers</Text>
+            </View>
+            {nearbyData.volunteers.map((volunteer: any, index: number) => (
+              <View
+                key={volunteer._id || index}
+                style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}
+              >
+                <View style={[styles.professionalAvatar, { backgroundColor: '#8B5CF6' }]}>
+                  <MaterialIcons name="person-outline" size={32} color="#fff" />
+                </View>
+                <View style={styles.professionalInfo}>
+                  <Text style={[styles.professionalName, { color: colors.text }]}>{volunteer.name}</Text>
+                  <Text style={[styles.professionalSpec, { color: colors.icon }]}>Volunteer First Responder</Text>
+                  <View style={styles.ratingContainer}>
+                    <AntDesign name="star" size={12} color="#FFC107" />
+                    <Text style={[styles.rating, { color: colors.text }]}>4.5</Text>
+                    <Text style={[styles.distance, { color: colors.icon }]}>
+                      • {(volunteer.distance || Math.random() * 8).toFixed(1)} km away
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.bookBtn, { backgroundColor: '#8B5CF6' }]}
+                  onPress={() => Alert.alert('Volunteer', `Contacting ${volunteer.name}...`)}
+                >
+                  <Text style={styles.bookBtnText}>Contact</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Daily Health Tip</Text>
-          <View style={styles.healthTipCard}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Daily Health Tip</Text>
+          <View style={[styles.healthTipCard, { backgroundColor: colors.cardBackground, borderColor: colors.cardBorder }]}>
             <View style={styles.healthTipIcon}>
               <Text style={styles.healthTipIconText}>💧</Text>
             </View>
             <View style={styles.healthTipContent}>
-              <Text style={styles.healthTipTitle}>Stay Hydrated</Text>
-              <Text style={styles.healthTipDesc}>
+              <Text style={[styles.healthTipTitle, { color: colors.text }]}>Stay Hydrated</Text>
+              <Text style={[styles.healthTipDesc, { color: colors.icon }]}>
                 Drink at least 8 glasses of water daily to maintain good health
               </Text>
             </View>
@@ -573,7 +576,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
   },
   scrollContent: {
     flexGrow: 1,
@@ -583,143 +585,153 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    marginBottom: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 22,
   },
   greeting: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 16,
     fontWeight: '400',
   },
   userName: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: 'bold',
-    color: '#1A1A1A',
     marginTop: 4,
   },
+  subGreeting: {
+    fontSize: 14,
+    marginTop: 6,
+  },
   profileButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#5B5FFF',
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+  },
+  profileInitial: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  heroCard: {
+    marginHorizontal: 18,
+    marginTop: 8,
+    padding: 20,
+    borderRadius: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  heroBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 16,
+    marginBottom: 10,
+  },
+  heroBadgeText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+    letterSpacing: 0.4,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  heroButton: {
+    backgroundColor: '#fff',
+    borderWidth: 0,
+    paddingVertical: 14,
+  },
+  servicesSection: {
+    paddingHorizontal: 18,
+    paddingTop: 22,
+  },
+  servicesTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 14,
+  },
+  servicesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  serviceCard: {
+    width: '48%',
+    borderRadius: 18,
+    padding: 16,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
     elevation: 4,
-    shadowColor: '#5B5FFF',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
   },
-
-  // SOS Styles
-  sosContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 24,
-    marginBottom: 24,
-  },
-  sosBackground: {
-    height: 280,
+  serviceIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
-    position: 'relative',
   },
-  ripple: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2,
-    borderColor: '#E53935',
-  },
-  sosButton: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#E53935',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#E53935',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    zIndex: 10,
-  },
-  sosIcon: {
-    fontSize: 48,
+  serviceTitle: {
+    fontSize: 18,
+    fontWeight: '800',
     marginBottom: 4,
   },
-  sosText: {
-    color: '#fff',
+  serviceSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  quickRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    marginTop: 18,
+    marginBottom: 6,
+    gap: 10,
+  },
+  quickPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  quickPillText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sosContainer: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  sosTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-  },
-  sosStatus: {
-    color: '#fff',
-    fontSize: 10,
-    marginTop: 4,
-    fontWeight: '600',
-  },
-  sosLoading: {
     marginBottom: 4,
   },
-  sosInfo: {
-    backgroundColor: '#FFEBEE',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#E53935',
-  },
-  sosInfoText: {
+  sosSubtitle: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#C62828',
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  sosInfoSubText: {
-    fontSize: 12,
-    color: '#E53935',
-    lineHeight: 18,
-  },
-
-  // Quick Actions
-  quickActionsContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 24,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  actionButtonLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 8,
-    color: '#1A1A1A',
-  },
-  actionButtonSub: {
-    fontSize: 11,
-    color: '#666',
-    marginTop: 2,
-  },
-
-  // Section Styles
   section: {
     paddingHorizontal: 16,
     marginBottom: 24,
@@ -731,92 +743,35 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: 'bold',
-    color: '#1A1A1A',
   },
   seeAll: {
-    fontSize: 13,
-    color: '#5B5FFF',
-    fontWeight: '600',
-  },
-
-  // Appointment Card
-  appointmentCard: {
-    backgroundColor: '#fff',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 10,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  appointmentLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  dateCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#EEF2FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  dateDay: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#5B5FFF',
-  },
-  dateMonth: {
-    fontSize: 11,
-    color: '#5B5FFF',
-    fontWeight: '600',
-  },
-  appointmentInfo: {
-    flex: 1,
-  },
-  appointmentName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1A1A1A',
   },
-  appointmentTime: {
-    fontSize: 12,
-    color: '#5B5FFF',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  appointmentAction: {
-    padding: 8,
-  },
-
-  // Professional Card
-  professionalCard: {
-    backgroundColor: '#fff',
+  mapViewButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
+    gap: 4,
+  },
+  professionalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 16,
     marginBottom: 10,
-    elevation: 2,
+    borderWidth: 1,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
   professionalAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#5B5FFF',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -825,13 +780,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   professionalName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   professionalSpec: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: 13,
     marginTop: 2,
   },
   ratingContainer: {
@@ -842,27 +796,27 @@ const styles = StyleSheet.create({
   rating: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#333',
     marginLeft: 4,
   },
   distance: {
     fontSize: 12,
-    color: '#999',
     marginLeft: 2,
   },
   bookBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#5B5FFF',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
   bookBtnText: {
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
+    fontWeight: '700',
+    fontSize: 13,
   },
-
-  // Empty State
   emptyState: {
     paddingVertical: 32,
     justifyContent: 'center',
@@ -870,25 +824,35 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 14,
-    color: '#999',
     marginTop: 8,
   },
-
-  // Health Tip Card
-  healthTipCard: {
-    backgroundColor: '#fff',
+  refreshButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    elevation: 2,
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  refreshButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  healthTipCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
   healthTipIcon: {
-    fontSize: 40,
     marginRight: 12,
   },
   healthTipIconText: {
@@ -898,13 +862,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   healthTipTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   healthTipDesc: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: 13,
     marginTop: 4,
     lineHeight: 18,
   },

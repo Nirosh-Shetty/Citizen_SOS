@@ -81,6 +81,10 @@ export const appointmentsAPI = {
   getUpcomingAppointments: async (userId: string) => api.get(`/appointments/upcoming/${userId}`),
   updateAppointmentStatus: async (appointmentId: string, status: string) =>
     api.put(`/appointments/${appointmentId}`, { status }),
+  cancelAppointment: async (appointmentId: string) =>
+    api.post(`/appointments/${appointmentId}/cancel`, {}),
+  rescheduleAppointment: async (appointmentId: string, appointmentDate: string, timeSlot: string) =>
+    api.post(`/appointments/${appointmentId}/reschedule`, { appointmentDate, timeSlot }),
 };
 
 // Booking API calls (Ambulance & Services)

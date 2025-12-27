@@ -11,10 +11,13 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   Alert,
+  Modal,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { usersAPI } from '../../utils/api';
+import { usersAPI, locationAPI } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import GoogleMap from '../../components/GoogleMap';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function NearbyFacilitiesScreen() {
   const { user } = useAuth();
@@ -24,9 +27,15 @@ export default function NearbyFacilitiesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [radius, setRadius] = useState(10);
   const [facilities, setFacilities] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [nurses, setNurses] = useState<any[]>([]);
+  const [ambulances, setAmbulances] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [userLocation, setUserLocation] = useState<any>(null);
+  const [showMapModal, setShowMapModal] = useState(false);
+  const [selectedFacility, setSelectedFacility] = useState<any>(null);
+  const [mapMarkers, setMapMarkers] = useState<any[]>([]);
 
   const tabs = ['doctors', 'nurses', 'ambulances'] as const;
 
@@ -39,6 +48,30 @@ export default function NearbyFacilitiesScreen() {
       fetchNearbyFacilities();
     }
   }, [activeTab, radius, userLocation]);
+
+  const generateMapMarkers = (lists: { doctors?: any[]; nurses?: any[]; ambulances?: any[] }) => {
+    const markers: any[] = [];
+    const addList = (items: any[], type: 'doctors' | 'nurses' | 'ambulances') => {
+      items.forEach((facility: any, index: number) => {
+        const lat = facility.latitude ?? userLocation?.latitude;
+        const lon = facility.longitude ?? userLocation?.longitude;
+        if (!lat || !lon) return;
+        markers.push({
+          id: facility.id || facility._id || `${type}-${index}`,
+          latitude: lat,
+          longitude: lon,
+          title: facility.name || facility.operatorName || 'Unknown',
+          description: facility.specialization || facility.vehicleNumber || '',
+          type: type === 'ambulances' ? 'ambulance' : type.slice(0, -1),
+          facility,
+        });
+      });
+    };
+    if (lists.doctors) addList(lists.doctors, 'doctors');
+    if (lists.nurses) addList(lists.nurses, 'nurses');
+    if (lists.ambulances) addList(lists.ambulances, 'ambulances');
+    return markers;
+  };
 
   const initializeLocation = async () => {
     try {
@@ -53,6 +86,18 @@ export default function NearbyFacilitiesScreen() {
       });
 
       setUserLocation(loc.coords);
+
+      // Persist to backend location history
+      try {
+        await locationAPI.updateLocation(
+          loc.coords.latitude,
+          loc.coords.longitude,
+          '',
+          loc.coords.accuracy || 0
+        );
+      } catch (e) {
+        // Non-blocking: ignore persistence errors
+      }
     } catch (error) {
       console.error('Location error:', error);
       Alert.alert('Error', 'Could not get your location');
@@ -64,20 +109,39 @@ export default function NearbyFacilitiesScreen() {
 
     setLoading(true);
     try {
-      let response;
       const { latitude, longitude } = userLocation;
+      const [docRes, nurseRes, ambRes] = await Promise.all([
+        usersAPI.getNearbyProfessionals('doctor', latitude, longitude, radius),
+        usersAPI.getNearbyProfessionals('nurse', latitude, longitude, radius),
+        usersAPI.getNearbyAmbulances(latitude, longitude, radius),
+      ]);
 
-      if (activeTab === 'doctors' || activeTab === 'nurses') {
-        response = await usersAPI.getNearbyProfessionals(activeTab, latitude, longitude, radius);
-      } else {
-        response = await usersAPI.getNearbyAmbulances(latitude, longitude, radius);
-      }
+      const docs = docRes.data || [];
+      const nurs = nurseRes.data || [];
+      const ambs = ambRes.data || [];
+      setDoctors(docs);
+      setNurses(nurs);
+      setAmbulances(ambs);
 
-      setFacilities(response.data || []);
+      // Set list for active tab
+      const currentList = activeTab === 'doctors' ? docs : activeTab === 'nurses' ? nurs : ambs;
+      setFacilities(currentList);
+
+      // Build combined markers for map
+      setMapMarkers(generateMapMarkers({ doctors: docs, nurses: nurs, ambulances: ambs }));
     } catch (error) {
       console.error('Error fetching facilities:', error);
       // Use mock data as fallback
-      setFacilities(getMockData());
+      const mockData = getMockData();
+      setFacilities(mockData);
+      // Fallback markers only for active tab
+      const combined =
+        activeTab === 'doctors'
+          ? { doctors: mockData }
+          : activeTab === 'nurses'
+          ? { nurses: mockData }
+          : { ambulances: mockData };
+      setMapMarkers(generateMapMarkers(combined));
     } finally {
       setLoading(false);
     }
@@ -162,7 +226,13 @@ export default function NearbyFacilitiesScreen() {
   };
 
   const renderFacilityCard = ({ item }: { item: any }) => (
-    <TouchableOpacity style={styles.card}>
+    <TouchableOpacity 
+      style={styles.card}
+      onPress={() => {
+        setSelectedFacility(item);
+        setShowMapModal(true);
+      }}
+    >
       <View style={styles.cardHeader}>
         <Text style={styles.icon}>{item.icon}</Text>
         <View style={styles.cardInfo}>
@@ -198,7 +268,13 @@ export default function NearbyFacilitiesScreen() {
           <Text style={styles.buttonIcon}>📅</Text>
           <Text style={styles.buttonText}>Book</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.button, styles.directionsButton]}>
+        <TouchableOpacity 
+          style={[styles.button, styles.directionsButton]}
+          onPress={() => {
+            setSelectedFacility(item);
+            setShowMapModal(true);
+          }}
+        >
           <Text style={styles.buttonIcon}>🗺️</Text>
           <Text style={styles.buttonText}>Map</Text>
         </TouchableOpacity>
@@ -212,6 +288,20 @@ export default function NearbyFacilitiesScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Nearby Facilities</Text>
         <Text style={styles.subtitle}>Find doctors, nurses & ambulances</Text>
+        <View style={styles.countsRow}>
+          <View style={styles.countChip}>
+            <Text style={styles.countLabel}>Doctors</Text>
+            <Text style={styles.countValue}>{doctors.length}</Text>
+          </View>
+          <View style={styles.countChip}>
+            <Text style={styles.countLabel}>Nurses</Text>
+            <Text style={styles.countValue}>{nurses.length}</Text>
+          </View>
+          <View style={styles.countChip}>
+            <Text style={styles.countLabel}>Ambulances</Text>
+            <Text style={styles.countValue}>{ambulances.length}</Text>
+          </View>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -307,10 +397,96 @@ export default function NearbyFacilitiesScreen() {
         </View>
       )}
 
-      {/* Map Button (Floating) */}
-      <TouchableOpacity style={styles.mapFab}>
+      {/* Map FAB */}
+      <TouchableOpacity 
+        style={styles.mapFab}
+        onPress={() => setShowMapModal(true)}
+      >
         <Text style={styles.mapIcon}>🗺️</Text>
       </TouchableOpacity>
+
+      {/* Map Modal */}
+      <Modal
+        visible={showMapModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowMapModal(false)}
+      >
+        <SafeAreaView style={styles.mapContainer}>
+          {/* Close Button */}
+          <View style={styles.mapHeader}>
+            <TouchableOpacity 
+              style={styles.closeButton}
+              onPress={() => setShowMapModal(false)}
+            >
+              <MaterialCommunityIcons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.mapTitle}>
+              {selectedFacility ? selectedFacility.name : 'Nearby ' + activeTab}
+            </Text>
+            <View style={{ width: 44 }} />
+          </View>
+
+          {/* Google Map */}
+          {userLocation && (
+            <GoogleMap
+              initialRegion={{
+                latitude: (selectedFacility?.latitude ?? userLocation.latitude),
+                longitude: (selectedFacility?.longitude ?? userLocation.longitude),
+                latitudeDelta: 0.0922,
+                longitudeDelta: 0.0421,
+              }}
+              markers={selectedFacility ? generateMapMarkers({
+                [activeTab]: [selectedFacility]
+              }) : mapMarkers}
+              showRadius
+              radiusKm={radius}
+              showUserLocation
+            />
+          )}
+
+          {/* Facility Details Bottom Sheet */}
+          {selectedFacility && (
+            <View style={styles.facilityDetailsSheet}>
+              <View style={styles.detailsContent}>
+                <View style={styles.detailsHeader}>
+                  <Text style={styles.detailsIcon}>{selectedFacility.icon}</Text>
+                  <View>
+                    <Text style={styles.detailsName}>{selectedFacility.name}</Text>
+                    <Text style={styles.detailsSpec}>{selectedFacility.specialization}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.detailsMeta}>
+                  <View style={styles.detailsMetaItem}>
+                    <Text>⭐</Text>
+                    <Text style={styles.detailsMetaText}>{selectedFacility.rating}</Text>
+                  </View>
+                  <View style={styles.detailsMetaItem}>
+                    <Text>📍</Text>
+                    <Text style={styles.detailsMetaText}>{selectedFacility.distance.toFixed(1)} km</Text>
+                  </View>
+                  <View style={styles.detailsMetaItem}>
+                    <Text>{selectedFacility.availability ? '🟢' : '🔴'}</Text>
+                    <Text style={styles.detailsMetaText}>
+                      {selectedFacility.availability ? 'Available' : 'Busy'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.detailsActions}>
+                  <TouchableOpacity style={styles.detailsButton}>
+                    <Text style={styles.detailsButtonText}>📞 Call Now</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.detailsButton}>
+                    <Text style={styles.detailsButtonText}>📅 Book Appointment</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -341,6 +517,30 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   searchInput: {
+  countsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  countChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 6,
+  },
+  countLabel: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '600',
+  },
+  countValue: {
+    fontSize: 12,
+    color: '#5B5FFF',
+    fontWeight: '700',
+  },
     flex: 1,
     borderWidth: 1,
     borderColor: '#E8E8E8',
@@ -567,4 +767,103 @@ const styles = StyleSheet.create({
   mapIcon: {
     fontSize: 28,
   },
+  // Map Modal Styles
+  mapContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  mapHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#5B5FFF',
+  },
+  closeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mapTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+  },
+  facilityDetailsSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  detailsContent: {
+    gap: 16,
+  },
+  detailsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailsIcon: {
+    fontSize: 40,
+  },
+  detailsName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  detailsSpec: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 2,
+  },
+  detailsMeta: {
+    flexDirection: 'row',
+    gap: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#E8E8E8',
+  },
+  detailsMetaItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  detailsMetaText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  detailsActions: {
+    gap: 10,
+  },
+  detailsButton: {
+    backgroundColor: '#5B5FFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  detailsButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  }
 });

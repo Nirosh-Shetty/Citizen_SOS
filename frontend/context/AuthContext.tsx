@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { authAPI, usersAPI } from '../utils/api';
+import { authAPI, usersAPI, locationAPI } from '../utils/api';
 import { storageService } from '../utils/storage';
 
 interface User {
@@ -91,7 +91,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (latitude: number, longitude: number) => {
       if (user) {
         try {
+          // Update current lat/lon on user profile
           await usersAPI.updateLocation(user.id, latitude, longitude);
+          // Also record location in history for live tracking
+          try {
+            await locationAPI.updateLocation(latitude, longitude, '', 0);
+          } catch (e) {
+            // non-blocking: ignore history write failure
+          }
           setUser((prev) =>
             prev ? { ...prev, latitude, longitude } : null
           );

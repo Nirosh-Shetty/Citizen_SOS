@@ -27,6 +27,7 @@ export default function DoctorsMapScreen() {
   const [doctors, setDoctors] = useState<any[]>([]);
   const [nurses, setNurses] = useState<any[]>([]);
   const [ambulances, setAmbulances] = useState<any[]>([]);
+  const [radiusKm, setRadiusKm] = useState<number>(25);
   const [loading, setLoading] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'doctors' | 'nurses' | 'ambulances'>('all');
   const [selectedMarker, setSelectedMarker] = useState<any>(null);
@@ -50,20 +51,20 @@ export default function DoctorsMapScreen() {
       });
 
       setLocation(loc.coords);
-      fetchNearbyProfessionals(loc.coords.latitude, loc.coords.longitude);
+      fetchNearbyProfessionals(loc.coords.latitude, loc.coords.longitude, radiusKm);
     } catch (error) {
       console.error('Location error:', error);
       Alert.alert('Error', 'Could not get your location');
     }
   };
 
-  const fetchNearbyProfessionals = async (latitude: number, longitude: number) => {
+  const fetchNearbyProfessionals = async (latitude: number, longitude: number, radius: number) => {
     try {
       setLoading(true);
       const [doctorRes, nurseRes, ambulanceRes] = await Promise.all([
-        usersAPI.getNearbyProfessionals('doctor', latitude, longitude, 15),
-        usersAPI.getNearbyProfessionals('nurse', latitude, longitude, 15),
-        usersAPI.getNearbyAmbulances(latitude, longitude, 15),
+        usersAPI.getNearbyProfessionals('doctor', latitude, longitude, radius),
+        usersAPI.getNearbyProfessionals('nurse', latitude, longitude, radius),
+        usersAPI.getNearbyAmbulances(latitude, longitude, radius),
       ]);
 
       setDoctors(doctorRes.data || []);
@@ -242,8 +243,37 @@ export default function DoctorsMapScreen() {
         <View style={styles.locationInfo}>
           <MaterialIcons name="location-on" size={16} color="#5B5FFF" />
           <Text style={styles.locationText}>
-            Showing services within 15 km radius
+            Showing services within {radiusKm} km radius
           </Text>
+        </View>
+      )}
+
+      {/* Radius Controls */}
+      {location && (
+        <View style={styles.radiusContainer}>
+          <Text style={styles.radiusLabel}>Radius</Text>
+          <View style={styles.radiusButtonsRow}>
+            {[10, 25, 50].map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.radiusButton, radiusKm === r && styles.radiusButtonActive]}
+                onPress={() => {
+                  setRadiusKm(r);
+                  fetchNearbyProfessionals(location.latitude, location.longitude, r);
+                }}
+              >
+                <Text style={[styles.radiusButtonText, radiusKm === r && styles.radiusButtonTextActive]}>
+                  {r} km
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={() => fetchNearbyProfessionals(location.latitude, location.longitude, radiusKm)}
+            >
+              <MaterialIcons name="refresh" size={18} color="#5B5FFF" />
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -256,7 +286,7 @@ export default function DoctorsMapScreen() {
             showUserLocation={true}
             onMarkerPress={handleMarkerPress}
             showRadius={true}
-            radiusKm={15}
+            radiusKm={radiusKm}
             mapHeight={height - 150}
           />
         </View>
@@ -271,7 +301,7 @@ export default function DoctorsMapScreen() {
               showUserLocation={true}
               onMarkerPress={handleMarkerPress}
               showRadius={true}
-              radiusKm={15}
+              radiusKm={radiusKm}
               mapHeight={height * 0.35}
               style={styles.mapView}
             />
@@ -472,6 +502,56 @@ const styles = StyleSheet.create({
     color: '#5B5FFF',
     marginLeft: 8,
     fontWeight: '500',
+  },
+  radiusContainer: {
+    marginTop: 8,
+    marginHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E6E9F5',
+  },
+  radiusLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  radiusButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  radiusButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#F8F9FF',
+    marginRight: 8,
+  },
+  radiusButtonActive: {
+    backgroundColor: '#5B5FFF',
+    borderColor: '#5B5FFF',
+  },
+  radiusButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#5B5FFF',
+  },
+  radiusButtonTextActive: {
+    color: '#fff',
+  },
+  refreshButton: {
+    marginLeft: 'auto',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#F8F9FF',
   },
   mapView: {
     marginTop: 8,
