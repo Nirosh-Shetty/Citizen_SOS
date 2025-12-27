@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
 const socketIO = require('socket.io');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,6 +18,8 @@ const io = socketIO(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Static uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Database Connection
 const connectDB = async () => {
@@ -32,7 +35,6 @@ const connectDB = async () => {
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
-app.use('/api/profile', require('./routes/profile'));
 app.use('/api/appointments', require('./routes/appointments'));
 app.use('/api/booking', require('./routes/booking'));
 app.use('/api/emergency', require('./routes/emergency'));

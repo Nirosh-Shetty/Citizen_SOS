@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   Alert,
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
+import * as ImagePicker from 'expo-image-picker';
+import { usersAPI } from '../../utils/api';
 import { useRouter } from 'expo-router';
 
 export default function ProfileScreen() {
@@ -19,6 +21,8 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [docs, setDocs] = useState<Array<any>>([]);
+  const [uploading, setUploading] = useState(false);
 
   const menuItems = [
     { id: 'profile', label: 'My Profile', icon: '👤', action: () => {} },
@@ -32,11 +36,59 @@ export default function ProfileScreen() {
     { id: 'logout', label: 'Logout', icon: '🚪', action: logout },
   ];
 
-  const documents = [
-    { id: '1', name: 'Aadhar Card', type: 'ID', status: 'Verified' },
-    { id: '2', name: 'Medical License', type: 'Professional', status: 'Pending' },
-    { id: '3', name: 'Insurance Card', type: 'Insurance', status: 'Verified' },
-  ];
+  const fetchDocuments = async () => {
+    if (!user?.id) return;
+    try {
+      const res = await usersAPI.getDocuments(user.id);
+      setDocs(res.data || []);
+    } catch (e) {
+      // keep UI minimal, optionally alert on error
+    }
+  };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, [user?.id]);
+
+  const handleUploadDocument = async () => {
+    if (!user?.id) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission required', 'Media library access is needed to upload documents.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset?.uri) return;
+
+      setUploading(true);
+      const form = new FormData();
+      // Infer filename and type
+      const name = asset.fileName || 'document.jpg';
+      const type = asset.mimeType || 'image/jpeg';
+      form.append('file', {
+        uri: asset.uri,
+        name,
+        type,
+      } as any);
+      form.append('name', name);
+      // Default to Professional for clinicians, ID for users
+      form.append('type', user.userType === 'doctor' || user.userType === 'nurse' ? 'Professional' : 'ID');
+
+      await usersAPI.uploadDocument(user.id, form);
+      await fetchDocuments();
+      Alert.alert('Success', 'Document uploaded');
+    } catch (e) {
+      Alert.alert('Upload failed', 'Could not upload document.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleMenuPress = (item: any) => {
     if (item.action) {
@@ -122,12 +174,12 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>📄 Documents</Text>
-            <TouchableOpacity>
-              <Text style={styles.uploadLink}>+ Upload</Text>
+            <TouchableOpacity onPress={handleUploadDocument} disabled={uploading}>
+              <Text style={[styles.uploadLink, uploading && { opacity: 0.6 }]}>{uploading ? 'Uploading...' : '+ Upload'}</Text>
             </TouchableOpacity>
           </View>
-          {documents.map((doc) => (
-            <View key={doc.id} style={styles.documentItem}>
+          {docs.map((doc) => (
+            <View key={doc._id || doc.id} style={styles.documentItem}>
               <View>
                 <Text style={styles.documentName}>{doc.name}</Text>
                 <Text style={styles.documentType}>{doc.type}</Text>
@@ -138,10 +190,13 @@ export default function ProfileScreen() {
                   doc.status === 'Verified' && styles.verifiedBadge,
                 ]}
               >
-                <Text style={styles.statusText}>{doc.status}</Text>
+                <Text style={styles.statusText}>{doc.status || 'Pending'}</Text>
               </View>
             </View>
           ))}
+          {docs.length === 0 && (
+            <Text style={{ color: '#666' }}>No documents uploaded yet.</Text>
+          )}
         </View>
 
         {/* Contact Information */}

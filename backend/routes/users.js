@@ -3,6 +3,20 @@ const router = express.Router();
 const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
 const { calculateDistance, sortByDistance, isValidCoordinates } = require('../utils/geolocation');
+const multer = require('multer');
+const path = require('path');
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, '..', 'uploads'));
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const unique = `${base}_${Date.now()}${ext}`;
+    cb(null, unique);
+  }
+});
+const upload = multer({ storage });
 
 // Update location
 router.post('/update-location/:userId', authMiddleware, async (req, res) => {
@@ -22,14 +36,17 @@ router.post('/update-location/:userId', authMiddleware, async (req, res) => {
 // Get nearby professionals (doctors/nurses)
 router.get('/nearby/professionals/:userType', async (req, res) => {
   try {
-    const { latitude, longitude, radius = 5 } = req.query;
+    const lat = parseFloat(req.query.latitude);
+    const lon = parseFloat(req.query.longitude);
+    const parsedRadius = parseFloat(String(req.query.radius ?? '25'));
+    const rad = Number.isNaN(parsedRadius) ? 25 : parsedRadius;
 
     // Validate required parameters
-    if (!latitude || !longitude) {
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
       return res.status(400).json({ error: 'Latitude and longitude are required' });
     }
 
-    if (!isValidCoordinates(latitude, longitude)) {
+    if (!isValidCoordinates(lat, lon)) {
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
 
@@ -48,14 +65,9 @@ router.get('/nearby/professionals/:userType', async (req, res) => {
     const nearby = professionals
       .map(prof => ({
         ...prof.toObject(),
-        distance: calculateDistance(
-          parseFloat(latitude),
-          parseFloat(longitude),
-          prof.latitude,
-          prof.longitude
-        )
+        distance: calculateDistance(lat, lon, prof.latitude, prof.longitude)
       }))
-      .filter(prof => prof.distance <= parseFloat(radius))
+      .filter(prof => prof.distance <= rad)
       .sort((a, b) => a.distance - b.distance);
 
     res.json(nearby);
@@ -68,14 +80,17 @@ router.get('/nearby/professionals/:userType', async (req, res) => {
 // Get nearby ambulances
 router.get('/nearby/ambulances', async (req, res) => {
   try {
-    const { latitude, longitude, radius = 5 } = req.query;
+    const lat = parseFloat(req.query.latitude);
+    const lon = parseFloat(req.query.longitude);
+    const parsedRadius = parseFloat(String(req.query.radius ?? '25'));
+    const rad = Number.isNaN(parsedRadius) ? 25 : parsedRadius;
 
     // Validate required parameters
-    if (!latitude || !longitude) {
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
       return res.status(400).json({ error: 'Latitude and longitude are required' });
     }
 
-    if (!isValidCoordinates(latitude, longitude)) {
+    if (!isValidCoordinates(lat, lon)) {
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
 
@@ -93,14 +108,9 @@ router.get('/nearby/ambulances', async (req, res) => {
     const nearby = ambulances
       .map(amb => ({
         ...amb.toObject(),
-        distance: calculateDistance(
-          parseFloat(latitude),
-          parseFloat(longitude),
-          amb.latitude,
-          amb.longitude
-        )
+        distance: calculateDistance(lat, lon, amb.latitude, amb.longitude)
       }))
-      .filter(amb => amb.distance <= parseFloat(radius))
+      .filter(amb => amb.distance <= rad)
       .sort((a, b) => a.distance - b.distance);
 
     res.json(nearby);
@@ -113,14 +123,17 @@ router.get('/nearby/ambulances', async (req, res) => {
 // Get available volunteers
 router.get('/nearby/volunteers', async (req, res) => {
   try {
-    const { latitude, longitude, radius = 5 } = req.query;
+    const lat = parseFloat(req.query.latitude);
+    const lon = parseFloat(req.query.longitude);
+    const parsedRadius = parseFloat(String(req.query.radius ?? '25'));
+    const rad = Number.isNaN(parsedRadius) ? 25 : parsedRadius;
 
     // Validate required parameters
-    if (!latitude || !longitude) {
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
       return res.status(400).json({ error: 'Latitude and longitude are required' });
     }
 
-    if (!isValidCoordinates(latitude, longitude)) {
+    if (!isValidCoordinates(lat, lon)) {
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
 
@@ -138,14 +151,9 @@ router.get('/nearby/volunteers', async (req, res) => {
     const nearby = volunteers
       .map(vol => ({
         ...vol.toObject(),
-        distance: calculateDistance(
-          parseFloat(latitude),
-          parseFloat(longitude),
-          vol.latitude,
-          vol.longitude
-        )
+        distance: calculateDistance(lat, lon, vol.latitude, vol.longitude)
       }))
-      .filter(vol => vol.distance <= parseFloat(radius))
+      .filter(vol => vol.distance <= rad)
       .sort((a, b) => a.distance - b.distance);
 
     res.json(nearby);
@@ -299,6 +307,36 @@ router.post('/:userId/payment-methods/:methodId/set-default', authMiddleware, as
   }
 });
 
+// Update payment method
+router.put('/:userId/payment-methods/:methodId', authMiddleware, async (req, res) => {
+  try {
+    const User = require('../models/User');
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const idx = (user.paymentMethods || []).findIndex(m => m._id.toString() === req.params.methodId);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    const current = user.paymentMethods[idx];
+    // Only allow updating non-sensitive display fields
+    const allowed = ['cardHolderName','expiryMonth','expiryYear','upiId','walletProvider','bankName','ifscCode'];
+    allowed.forEach((k) => {
+      if (req.body[k] !== undefined) current[k] = req.body[k];
+    });
+    // isDefault and isVerified can also be toggled via explicit routes, but allow verified update
+    if (typeof req.body.isVerified === 'boolean') current.isVerified = req.body.isVerified;
+
+    await user.save();
+    res.json({ message: 'Payment method updated', method: current });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ====== ORDER HISTORY ======
 
 // Get order history for user
@@ -363,6 +401,30 @@ router.get('/:userId/orders', authMiddleware, async (req, res) => {
   }
 });
 
+// ====== TRANSACTIONS ======
+
+// Get transaction history for user
+router.get('/:userId/transactions', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const User = require('../models/User');
+    const user = await User.findById(userId).select('transactions');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const { filter } = req.query;
+    let tx = user.transactions || [];
+    if (filter && filter !== 'All') {
+      tx = tx.filter(t => t.status === filter);
+    }
+    // sort newest first
+    tx.sort((a, b) => new Date(b.transactionDate) - new Date(a.transactionDate));
+    res.json(tx);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ====== USER PROFILE ENDPOINTS ======
 
 // Get user profile
@@ -387,6 +449,68 @@ router.put('/:userId', authMiddleware, async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(req.params.userId, req.body, { new: true }).select('-password');
     res.json(updatedUser);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ====== DOCUMENTS ======
+
+// Upload document (metadata-focused; file optional)
+router.post('/:userId/documents', authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const doc = {
+      _id: new mongoose.Types.ObjectId(),
+      name: req.body.name || (req.file ? req.file.originalname : 'Document'),
+      type: req.body.type || 'Other',
+      fileUrl: req.file ? `/uploads/${req.file.filename}` : (req.body.fileUrl || ''),
+      status: 'Pending',
+      uploadedAt: new Date(),
+    };
+
+    if (!user.documents) user.documents = [];
+    user.documents.push(doc);
+    await user.save();
+
+    res.status(201).json(doc);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get documents
+router.get('/:userId/documents', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select('documents');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(user.documents || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete document
+router.delete('/:userId/documents/:documentId', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const before = (user.documents || []).length;
+    user.documents = (user.documents || []).filter(d => d._id.toString() !== req.params.documentId);
+    if (user.documents.length === before) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    await user.save();
+    res.json({ message: 'Document deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

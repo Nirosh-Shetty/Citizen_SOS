@@ -148,7 +148,7 @@ export const useLocation = (options: UseLocationOptions = {}) => {
             timeInterval: updateInterval,
             distanceInterval: 10, // update on 10m movement
           },
-          (nativeLocation: Location.LocationObject) => {
+          (nativeLocation: any) => {
             const locationData: LocationData = {
               latitude: nativeLocation.coords.latitude,
               longitude: nativeLocation.coords.longitude,

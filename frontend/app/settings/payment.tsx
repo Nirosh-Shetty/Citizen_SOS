@@ -1,135 +1,159 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  TextInput,
-  Modal,
-  FlatList,
-  Alert,
   ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { usersAPI } from '../../utils/api';
-import { useAuth } from '../../context/AuthContext';
 import { MaterialIcons } from '@expo/vector-icons';
 
-export default function PaymentMethodsScreen() {
-  const { user } = useAuth();
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
-  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+type PaymentType = 'card' | 'upi' | 'wallet';
+
+interface PaymentMethod {
+  id: string;
+  type: PaymentType;
+  label: string;
+  detail: string;
+  isDefault: boolean;
+}
+
+const paymentIcons: Record<PaymentType, string> = {
+  card: '💳',
+  upi: '📱',
+  wallet: '💰',
+};
+
+const formatDetail = (method: PaymentMethod) => {
+  if (method.type === 'card') {
+    return `•••• ${method.detail.slice(-4)}`;
+  }
+  return method.detail;
+};
+
+const PaymentScreen = () => {
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
-  const [addingPayment, setAddingPayment] = useState(false);
-  
-  // Form fields
-  const [paymentType, setPaymentType] = useState('card');
-  const [cardNumber, setCardNumber] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [paymentType, setPaymentType] = useState<PaymentType>('card');
   const [holderName, setHolderName] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
   const [expiryMonth, setExpiryMonth] = useState('');
   const [expiryYear, setExpiryYear] = useState('');
+  const [addingPayment, setAddingPayment] = useState(false);
 
   useEffect(() => {
-    if (user?.id) {
-      fetchPaymentMethods();
-    }
-  }, [user?.id]);
+    const seed: PaymentMethod[] = [
+      {
+        id: '1',
+        type: 'card',
+        label: 'Visa ending 4242',
+        detail: '4242',
+        isDefault: true,
+      },
+      {
+        id: '2',
+        type: 'upi',
+        label: 'UPI',
+        detail: 'john.doe@upi',
+        isDefault: false,
+      },
+      {
+        id: '3',
+        type: 'wallet',
+        label: 'Paytm Wallet',
+        detail: 'Linked',
+        isDefault: false,
+      },
+    ];
 
-  const fetchPaymentMethods = async () => {
-    try {
-      setLoading(true);
-      const response = await usersAPI.getPaymentMethods(user!.id);
-      setPaymentMethods(response.data || []);
-    } catch (error) {
-      console.error('Error fetching payment methods:', error);
-      Alert.alert('Error', 'Failed to load payment methods');
-    } finally {
-      setLoading(false);
-    }
+    setPaymentMethods(seed);
+    setLoading(false);
+  }, []);
+
+  const resetForm = () => {
+    setPaymentType('card');
+    setHolderName('');
+    setCardNumber('');
+    setExpiryMonth('');
+    setExpiryYear('');
   };
 
-  const handleAddPayment = async () => {
-    if (!cardNumber || !holderName || !expiryMonth || !expiryYear) {
-      Alert.alert('Error', 'Please fill in all fields');
+  const handleAddPayment = () => {
+    if (!holderName.trim()) {
+      Alert.alert('Missing name', 'Add a cardholder name to continue.');
+      return;
+    }
+
+    if (paymentType === 'card' && cardNumber.trim().length < 4) {
+      Alert.alert('Card number', 'Enter at least the last 4 digits.');
       return;
     }
 
     setAddingPayment(true);
-    try {
-      const paymentData = {
-        type: paymentType,
-        cardHolderName: holderName,
-        cardLast4: cardNumber.slice(-4),
-        expiryMonth: parseInt(expiryMonth),
-        expiryYear: parseInt(expiryYear),
-        isDefault: paymentMethods.length === 0,
-      };
 
-      const response = await usersAPI.addPaymentMethod(user!.id, paymentData);
-      setPaymentMethods([...paymentMethods, response.data]);
-      setShowAddModal(false);
-      setCardNumber('');
-      setHolderName('');
-      setExpiryMonth('');
-      setExpiryYear('');
-      Alert.alert('Success', 'Payment method added successfully');
-    } catch (error) {
-      console.error('Error adding payment:', error);
-      Alert.alert('Error', 'Failed to add payment method');
-    } finally {
-      setAddingPayment(false);
-    }
+    const last4 = cardNumber.trim().slice(-4) || '0000';
+    const newMethod: PaymentMethod = {
+      id: Date.now().toString(),
+      type: paymentType,
+      label:
+        paymentType === 'card'
+          ? `Card ending ${last4}`
+          : paymentType === 'upi'
+          ? 'UPI'
+          : 'Wallet',
+      detail: paymentType === 'card' ? last4 : cardNumber.trim() || holderName,
+      isDefault: paymentMethods.length === 0,
+    };
+
+    setPaymentMethods((prev) => [newMethod, ...prev.map((m) => ({ ...m, isDefault: false }))]);
+    setAddingPayment(false);
+    setShowAddModal(false);
+    resetForm();
   };
 
-  const handleDeletePayment = async (methodId: string) => {
-    Alert.alert('Delete Payment', 'Remove this payment method?', [
+  const handleSetDefault = (id: string) => {
+    setPaymentMethods((prev) => prev.map((m) => ({ ...m, isDefault: m.id === id })));
+  };
+
+  const handleDelete = (id: string) => {
+    Alert.alert('Remove payment method', 'Are you sure you want to remove this method?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
+        text: 'Remove',
         style: 'destructive',
-        onPress: async () => {
-          try {
-            await usersAPI.deletePaymentMethod(user!.id, methodId);
-            setPaymentMethods(paymentMethods.filter(p => p._id !== methodId));
-            Alert.alert('Deleted', 'Payment method removed');
-          } catch (error) {
-            console.error('Error deleting payment:', error);
-            Alert.alert('Error', 'Failed to delete payment method');
-          }
+        onPress: () => {
+          setPaymentMethods((prev) => {
+            const filtered = prev.filter((m) => m.id !== id);
+            if (filtered.length === 0) return [];
+
+            const hasDefault = filtered.some((m) => m.isDefault);
+            if (hasDefault) return filtered;
+
+            const [first, ...rest] = filtered;
+            return [{ ...first, isDefault: true }, ...rest];
+          });
         },
       },
     ]);
   };
 
-  const handleSetDefault = async (methodId: string) => {
-    try {
-      await usersAPI.setDefaultPayment(user!.id, methodId);
-      setPaymentMethods(
-        paymentMethods.map(p => ({
-          ...p,
-          isDefault: p._id === methodId
-        }))
-      );
-      Alert.alert('Success', 'Default payment method updated');
-    } catch (error) {
-      console.error('Error setting default:', error);
-      Alert.alert('Error', 'Failed to set default payment');
-    }
-  };
-
-  const renderPaymentMethod = ({ item }: any) => (
+  const renderPaymentMethod = ({ item }: { item: PaymentMethod }) => (
     <View style={[styles.paymentCard, item.isDefault && styles.paymentCardSelected]}>
       <View style={styles.paymentLeft}>
-        <Text style={styles.paymentIcon}>
-          {item.type === 'card' ? '💳' : item.type === 'upi' ? '📱' : '💰'}
-        </Text>
+        <Text style={styles.paymentIcon}>{paymentIcons[item.type]}</Text>
         <View>
-          <Text style={styles.paymentLabel}>{item.displayName}</Text>
-          <Text style={styles.paymentDetails}>{item.type}</Text>
+          <Text style={styles.paymentLabel}>{item.label}</Text>
+          <Text style={styles.paymentDetails}>{formatDetail(item)}</Text>
         </View>
       </View>
+
       <View style={styles.paymentRight}>
         {item.isDefault && (
           <View style={styles.defaultBadge}>
@@ -138,21 +162,14 @@ export default function PaymentMethodsScreen() {
         )}
         <TouchableOpacity
           onPress={() => {
-            Alert.alert('Payment Method', 'What would you like to do?', [
+            Alert.alert('Payment options', item.label, [
               { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Set as Default',
-                onPress: () => handleSetDefault(item._id)
-              },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: () => handleDeletePayment(item._id)
-              }
+              { text: 'Set as default', onPress: () => handleSetDefault(item.id) },
+              { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item.id) },
             ]);
           }}
         >
-          <Text style={styles.checkmark}>⋮</Text>
+          <MaterialIcons name="more-vert" size={22} color="#5B5FFF" />
         </TouchableOpacity>
       </View>
     </View>
@@ -161,8 +178,9 @@ export default function PaymentMethodsScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#5B5FFF" />
+          <Text style={styles.loadingText}>Loading payment methods...</Text>
         </View>
       </SafeAreaView>
     );
@@ -171,247 +189,170 @@ export default function PaymentMethodsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>💳 Payment Methods</Text>
-          <Text style={styles.subtitle}>Manage your payment options</Text>
+          <Text style={styles.title}>Payment Methods</Text>
+          <Text style={styles.subtitle}>Manage how you pay for bookings</Text>
         </View>
 
-        {/* Saved Methods */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Saved Methods</Text>
-            <TouchableOpacity
-              onPress={() => setShowAddModal(true)}
-              style={styles.addButton}
-            >
-              <Text style={styles.addButtonText}>+ Add New</Text>
+            <Text style={styles.sectionTitle}>Saved methods</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => setShowAddModal(true)}>
+              <Text style={styles.primaryButtonText}>+ Add new</Text>
             </TouchableOpacity>
           </View>
+
           {paymentMethods.length === 0 ? (
-            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-              <Text style={{ fontSize: 14, color: '#999', marginBottom: 10 }}>
-                No payment methods saved yet
-              </Text>
-              <TouchableOpacity
-                onPress={() => setShowAddModal(true)}
-                style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 8,
-                  backgroundColor: '#5B5FFF',
-                  borderRadius: 8,
-                }}
-              >
-                <Text style={{ color: 'white', fontWeight: '600' }}>
-                  Add Payment Method
-                </Text>
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No payment methods yet</Text>
+              <Text style={styles.emptySubtext}>Add a card, UPI, or wallet to continue.</Text>
+              <TouchableOpacity style={styles.primaryButton} onPress={() => setShowAddModal(true)}>
+                <Text style={styles.primaryButtonText}>Add payment method</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <FlatList
               data={paymentMethods}
               renderItem={renderPaymentMethod}
-              keyExtractor={(item) => item._id}
+              keyExtractor={(item) => item.id}
               scrollEnabled={false}
             />
           )}
         </View>
 
-        {/* Billing Address */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Billing Address</Text>
-          <View style={styles.addressCard}>
-            <Text style={styles.addressTitle}>Home</Text>
-            <Text style={styles.addressText}>
-              123 Main Street, Apt 4B{'\n'}
-              New York, NY 10001{'\n'}
-              United States
-            </Text>
-            <View style={styles.addressActions}>
-              <TouchableOpacity>
-                <Text style={styles.editLink}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity>
-                <Text style={styles.deleteLink}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.addAddressButton}>
-            <Text style={styles.addAddressText}>+ Add Another Address</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Transaction History */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Transactions</Text>
-          <View style={styles.transaction}>
-            <View>
-              <Text style={styles.transactionTitle}>Appointment - Dr. Smith</Text>
-              <Text style={styles.transactionDate}>Dec 20, 2025</Text>
-            </View>
-            <Text style={styles.transactionAmount}>₹500</Text>
-          </View>
-          <View style={styles.transaction}>
-            <View>
-              <Text style={styles.transactionTitle}>
-                Emergency Services
-              </Text>
-              <Text style={styles.transactionDate}>Dec 18, 2025</Text>
-            </View>
-            <Text style={styles.transactionAmount}>₹2,000</Text>
-          </View>
-          <TouchableOpacity style={styles.viewAllLink}>
-            <Text style={styles.viewAllText}>View All Transactions →</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Security Info */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security</Text>
           <View style={styles.securityInfo}>
             <Text style={styles.securityIcon}>🔒</Text>
             <View>
-              <Text style={styles.securityTitle}>Secure Payments</Text>
-              <Text style={styles.securityDesc}>
-                All transactions are secured with 256-bit encryption
-              </Text>
+              <Text style={styles.securityTitle}>Payments are encrypted</Text>
+              <Text style={styles.securityDesc}>256-bit encryption protects your data.</Text>
             </View>
           </View>
         </View>
       </ScrollView>
 
-      {/* Add Payment Modal */}
-      <Modal visible={showAddModal} animationType="slide" transparent>
+      <Modal visible={showAddModal} animationType="slide" transparent onRequestClose={() => setShowAddModal(false)}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Payment Method</Text>
+              <Text style={styles.modalTitle}>Add payment method</Text>
               <TouchableOpacity onPress={() => setShowAddModal(false)}>
-                <Text style={styles.closeButton}>✕</Text>
+                <MaterialIcons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
 
-            {/* Payment Type Selection */}
             <View style={styles.typeSelection}>
-              {['card', 'upi', 'wallet'].map((type) => (
+              {(['card', 'upi', 'wallet'] as PaymentType[]).map((type) => (
                 <TouchableOpacity
                   key={type}
-                  style={[
-                    styles.typeButton,
-                    paymentType === type && styles.typeButtonActive,
-                  ]}
+                  style={[styles.typeButton, paymentType === type && styles.typeButtonActive]}
                   onPress={() => setPaymentType(type)}
                 >
                   <Text
-                    style={[
-                      styles.typeButtonText,
-                      paymentType === type && styles.typeButtonTextActive,
-                    ]}
+                    style={[styles.typeButtonText, paymentType === type && styles.typeButtonTextActive]}
                   >
-                    {type === 'card'
-                      ? '💳 Card'
-                      : type === 'upi'
-                      ? '📱 UPI'
-                      : '💰 Wallet'}
+                    {paymentIcons[type]} {type.toUpperCase()}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Form Fields */}
-            <TextInput
-              style={styles.input}
-              placeholder="Cardholder Name"
-              value={holderName}
-              onChangeText={setHolderName}
-              editable={!addingPayment}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Card Number (last 4 digits)"
-              value={cardNumber}
-              onChangeText={setCardNumber}
-              keyboardType="numeric"
-              maxLength={4}
-              editable={!addingPayment}
-            />
-            <View style={{ flexDirection: 'row', gap: 10 }}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.label}>Cardholder name</Text>
               <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="Month (MM)"
-                value={expiryMonth}
-                onChangeText={setExpiryMonth}
-                keyboardType="numeric"
-                maxLength={2}
-                editable={!addingPayment}
+                style={styles.input}
+                placeholder="John Doe"
+                value={holderName}
+                onChangeText={setHolderName}
+                autoCapitalize="words"
               />
+
+              <Text style={styles.label}>Identifier</Text>
               <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="Year (YY)"
-                value={expiryYear}
-                onChangeText={setExpiryYear}
-                keyboardType="numeric"
-                maxLength={2}
-                editable={!addingPayment}
+                style={styles.input}
+                placeholder={paymentType === 'card' ? 'Last 4 digits' : 'UPI / wallet handle'}
+                value={cardNumber}
+                onChangeText={setCardNumber}
+                keyboardType={paymentType === 'card' ? 'numeric' : 'default'}
+                maxLength={paymentType === 'card' ? 4 : 40}
               />
-            </View>
 
-            {/* Set as Default */}
-            <TouchableOpacity style={styles.checkboxContainer}>
-              <Text style={styles.checkbox}>☐</Text>
-              <Text style={styles.checkboxLabel}>
-                Set as default payment method
-              </Text>
-            </TouchableOpacity>
-
-            {/* Buttons */}
-            <TouchableOpacity
-              style={[styles.addButton, addingPayment && { opacity: 0.6 }]}
-              onPress={handleAddPayment}
-              disabled={addingPayment}
-            >
-              {addingPayment ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <Text style={styles.addButtonText}>Add Payment Method</Text>
+              {paymentType === 'card' && (
+                <View style={styles.row}>
+                  <View style={styles.halfInput}>
+                    <Text style={styles.label}>Expiry month</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="MM"
+                      value={expiryMonth}
+                      onChangeText={setExpiryMonth}
+                      keyboardType="numeric"
+                      maxLength={2}
+                    />
+                  </View>
+                  <View style={styles.halfInput}>
+                    <Text style={styles.label}>Expiry year</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="YY"
+                      value={expiryYear}
+                      onChangeText={setExpiryYear}
+                      keyboardType="numeric"
+                      maxLength={2}
+                    />
+                  </View>
+                </View>
               )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => setShowAddModal(false)}
-              disabled={addingPayment}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.primaryButton, addingPayment && styles.primaryButtonDisabled]}
+                onPress={handleAddPayment}
+                disabled={addingPayment}
+              >
+                {addingPayment ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Save method</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowAddModal(false)}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
-}
+};
+
+export default PaymentScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8F9FF',
   },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    padding: 20,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECECEC',
   },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 4,
+    color: '#1A1A1A',
   },
   subtitle: {
+    marginTop: 4,
     fontSize: 14,
-    color: '#999',
+    color: '#666',
   },
   section: {
     paddingHorizontal: 20,
-    marginVertical: 16,
+    paddingVertical: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -422,33 +363,41 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: '#1A1A1A',
   },
-  addButton: {
+  primaryButton: {
     backgroundColor: '#5B5FFF',
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
   },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+  primaryButtonDisabled: {
+    opacity: 0.7,
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   paymentCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
     padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E6E6E6',
     marginBottom: 10,
-    borderWidth: 2,
-    borderColor: '#E8E8E8',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   paymentCardSelected: {
-    backgroundColor: '#5B5FFF20',
     borderColor: '#5B5FFF',
+    backgroundColor: '#EEF0FF',
   },
   paymentLeft: {
     flexDirection: 'row',
@@ -457,141 +406,80 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   paymentIcon: {
-    fontSize: 28,
+    fontSize: 26,
   },
   paymentLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 2,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
   paymentDetails: {
     fontSize: 12,
-    color: '#999',
+    color: '#666',
+    marginTop: 4,
   },
   paymentRight: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
   defaultBadge: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#5B5FFF',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: 6,
   },
   defaultText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  checkmark: {
-    color: '#5B5FFF',
-    fontSize: 20,
-  },
-  addressCard: {
-    backgroundColor: '#F5F5F5',
+  emptyState: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 20,
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E6E6E6',
   },
-  addressTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 6,
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
-  addressText: {
+  emptySubtext: {
     fontSize: 12,
     color: '#666',
-    lineHeight: 18,
-    marginBottom: 10,
-  },
-  addressActions: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  editLink: {
-    color: '#5B5FFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  deleteLink: {
-    color: '#FF6B6B',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  addAddressButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#E8E8E8',
-    borderRadius: 10,
-    borderStyle: 'dashed',
-  },
-  addAddressText: {
-    color: '#5B5FFF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  transaction: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  transactionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 2,
-  },
-  transactionDate: {
-    fontSize: 11,
-    color: '#999',
-  },
-  transactionAmount: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1a1a1a',
-  },
-  viewAllLink: {
-    marginTop: 12,
-    alignItems: 'center',
-  },
-  viewAllText: {
-    color: '#5B5FFF',
-    fontSize: 13,
-    fontWeight: '600',
+    marginVertical: 8,
   },
   securityInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E4F5E4',
+    backgroundColor: '#E8F5E9',
     borderRadius: 12,
     padding: 14,
     gap: 12,
   },
   securityIcon: {
-    fontSize: 28,
+    fontSize: 26,
   },
   securityTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#2E7D32',
-    marginBottom: 2,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
   securityDesc: {
     fontSize: 12,
     color: '#2E7D32',
+    marginTop: 2,
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
@@ -599,32 +487,28 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1a1a1a',
-  },
-  closeButton: {
-    fontSize: 24,
-    color: '#999',
+    color: '#1A1A1A',
   },
   typeSelection: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   typeButton: {
     flex: 1,
+    alignItems: 'center',
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8E8E8',
+    borderColor: '#E6E6E6',
+    backgroundColor: '#F6F7FB',
   },
   typeButtonActive: {
     backgroundColor: '#5B5FFF',
@@ -632,48 +516,57 @@ const styles = StyleSheet.create({
   },
   typeButtonText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
+    fontWeight: '700',
+    color: '#4A4A4A',
   },
   typeButtonTextActive: {
-    color: '#FFFFFF',
+    color: '#fff',
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4A4A4A',
+    marginTop: 12,
+    marginBottom: 6,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#E8E8E8',
+    backgroundColor: '#F8F9FF',
     borderRadius: 10,
-    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#E6E6E6',
+    paddingHorizontal: 12,
     paddingVertical: 12,
-    marginBottom: 12,
     fontSize: 14,
-    backgroundColor: '#F9F9F9',
   },
-  rowInput: {
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  halfInput: {
     flex: 1,
   },
-  checkboxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    gap: 8,
-  },
-  checkbox: {
-    fontSize: 20,
-  },
-  checkboxLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
   cancelButton: {
+    alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 10,
-    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8E8E8',
+    borderColor: '#E6E6E6',
+    marginTop: 10,
   },
   cancelButtonText: {
     color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#666',
   },
 });

@@ -1,162 +1,140 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   ActivityIndicator,
-  TouchableOpacity,
   Dimensions,
-  Alert,
-  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import MapView, { Marker, Callout, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Callout, Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 
-const { width, height } = Dimensions.get('window');
-
-interface Location {
+type LatLng = {
   latitude: number;
   longitude: number;
-}
+};
 
-interface MapMarker {
+type RegionShape = LatLng & {
+  latitudeDelta: number;
+  longitudeDelta: number;
+};
+
+type MapMarker = {
   id: string;
   latitude: number;
   longitude: number;
   title: string;
   description?: string;
-  type?: 'doctor' | 'nurse' | 'ambulance' | 'user' | 'emergency';
+  type?: 'doctor' | 'nurse' | 'ambulance' | 'user' | string;
   color?: string;
   onPress?: (marker: MapMarker) => void;
-}
+};
 
-interface Region {
-  latitude: number;
-  longitude: number;
-  latitudeDelta: number;
-  longitudeDelta: number;
-}
-
-interface GoogleMapProps {
-  initialRegion?: Region;
-  initialLocation?: Location;
-  userLocation?: Location | null;
-  markers: MapMarker[];
-  showUserLocation?: boolean;
+type Props = {
+  style?: object;
+  initialRegion?: RegionShape;
+  markers?: MapMarker[];
   onMarkerPress?: (marker: MapMarker) => void;
-  onMapPress?: (location: Location) => void;
+  onMapPress?: (coord: LatLng) => void;
   showRadius?: boolean;
   radiusKm?: number;
+  showUserLocation?: boolean;
   mapHeight?: number;
-  style?: any;
-}
+};
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyC8u6hmkl_JC4p4vV_WaDdpDjwag2gQSFM';
-
-const markerColors = {
+const markerColors: Record<string, string> = {
   doctor: '#5B5FFF',
   nurse: '#FF6B6B',
-  ambulance: '#FF9800',
-  user: '#4CAF50',
-  emergency: '#F44336',
+  ambulance: '#2EC4B6',
+  user: '#5B5FFF',
 };
 
 const getMarkerIcon = (type?: string) => {
   switch (type) {
     case 'doctor':
-      return '👨‍⚕️';
+      return '🩺';
     case 'nurse':
-      return '👩‍⚕️';
+      return '💉';
     case 'ambulance':
       return '🚑';
-    case 'emergency':
-      return '🚨';
     default:
       return '📍';
   }
 };
 
-export default function GoogleMap({
+const GoogleMap: React.FC<Props> = ({
+  style,
   initialRegion,
-  initialLocation,
-  userLocation: userLocationProp = null,
-  markers,
-  showUserLocation = true,
+  markers = [],
   onMarkerPress,
   onMapPress,
   showRadius = false,
-  radiusKm = 5,
-  mapHeight = height * 0.6,
-  style,
-}: GoogleMapProps) {
-  const mapRef = useRef<MapView>(null);
-  const [userLocation, setUserLocation] = useState<Location | null>(
-    userLocationProp || initialLocation || (initialRegion ? { latitude: initialRegion.latitude, longitude: initialRegion.longitude } : null)
-  );
-  const [loading, setLoading] = useState(!userLocation);
-  const [mapReady, setMapReady] = useState(false);
+  radiusKm = 2,
+  showUserLocation = true,
+  mapHeight = Dimensions.get('window').height * 0.4,
+}) => {
+  const mapRef = useRef<React.ComponentRef<typeof MapView> | null>(null);
+  const [userLocation, setUserLocation] = useState<LatLng | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   useEffect(() => {
-    if (!initialLocation) {
-      requestLocationPermission();
-    }
-  }, [initialLocation]);
+    getUserLocation();
+  }, []);
 
-  useEffect(() => {
-    if (userLocation && markers.length > 0 && mapReady) {
-      fitToMarkers();
-    }
-  }, [markers, mapReady]);
-
-  const requestLocationPermission = async () => {
+  const getUserLocation = async () => {
     try {
+      setLoading(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        setUserLocation({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-      } else {
-        Alert.alert('Permission Denied', 'Location permission is required to use maps');
+      if (status !== 'granted') {
+        setPermissionDenied(true);
+        setLoading(false);
+        return;
       }
-    } catch (error) {
-      console.error('Location error:', error);
+
+      const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setUserLocation({ latitude: coords.latitude, longitude: coords.longitude });
+      setPermissionDenied(false);
+    } catch (err) {
+      // keep fallback UI on error
     } finally {
       setLoading(false);
     }
   };
 
-  const fitToMarkers = () => {
-    if (!mapRef.current || !userLocation || markers.length === 0) return;
-
-    const allLocations = [userLocation, ...markers.map(m => ({ latitude: m.latitude, longitude: m.longitude }))];
-    
-    const minLat = Math.min(...allLocations.map(l => l.latitude));
-    const maxLat = Math.max(...allLocations.map(l => l.latitude));
-    const minLng = Math.min(...allLocations.map(l => l.longitude));
-    const maxLng = Math.max(...allLocations.map(l => l.longitude));
-
-    mapRef.current.fitToCoordinates(allLocations, {
-      edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
-      animated: true,
-    });
+  const centerOnUser = () => {
+    if (userLocation && mapRef.current) {
+      mapRef.current.animateCamera({ center: userLocation, zoom: 15 }, { duration: 500 });
+    }
   };
 
-  const handleMarkerPress = (marker: MapMarker) => {
-    if (onMarkerPress) {
-      onMarkerPress(marker);
-    }
-    marker.onPress?.(marker);
+  const getMarkerColor = (type?: string) => markerColors[type as keyof typeof markerColors] || markerColors.user;
+
+  const renderCustomMarker = (marker: MapMarker) => {
+    const color = marker.color || getMarkerColor(marker.type);
+    const icon = getMarkerIcon(marker.type);
+
+    return (
+      <View style={styles.markerContainer}>
+        <View style={[styles.markerBubble, { backgroundColor: color }]}>
+          <Text style={styles.markerIcon}>{icon}</Text>
+        </View>
+        <View style={[styles.markerArrow, { borderTopColor: color }]} />
+      </View>
+    );
+  };
+
+  const handleMapPress = (e: { nativeEvent: { coordinate: LatLng } }) => {
+    onMapPress?.(e.nativeEvent.coordinate);
   };
 
   if (loading) {
     return (
       <View style={[styles.container, { height: mapHeight }, style]}>
         <ActivityIndicator size="large" color="#5B5FFF" />
+        <Text style={styles.loadingText}>Loading map...</Text>
       </View>
     );
   }
@@ -164,77 +142,73 @@ export default function GoogleMap({
   if (!userLocation) {
     return (
       <View style={[styles.container, { height: mapHeight }, style]}>
-        <Text style={styles.errorText}>Location not available</Text>
+        <MaterialIcons name="location-off" size={48} color="#999" />
+        <Text style={styles.errorText}>
+          {permissionDenied ? 'Location permission denied' : 'Location not available'}
+        </Text>
+        <TouchableOpacity style={styles.retryButton} onPress={getUserLocation}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={[styles.mapContainer, { height: mapHeight }, style]}>
+    <View style={[styles.container, { height: mapHeight }, style]}>
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
-        initialRegion={{
-          latitude: userLocation.latitude,
-          longitude: userLocation.longitude,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
-        onPress={(e) => onMapPress?.(e.nativeEvent.coordinate)}
-        onMapReady={() => setMapReady(true)}
-        zoomEnabled={true}
-        scrollEnabled={true}
-        pitchEnabled={false}
+        initialRegion={
+          initialRegion || {
+            latitude: userLocation.latitude,
+            longitude: userLocation.longitude,
+            latitudeDelta: 0.05,
+            longitudeDelta: 0.05,
+          }
+        }
+        showsUserLocation={showUserLocation}
+        showsMyLocationButton
+        showsCompass
+        onPress={handleMapPress}
       >
-        {/* User Location Marker */}
-        {showUserLocation && userLocation && (
-          <>
-            <Marker
-              coordinate={userLocation}
-              title="Your Location"
-              pinColor="#4CAF50"
-            >
-              <View style={styles.userMarker}>
+        {showUserLocation && (
+          <Marker
+            coordinate={userLocation}
+            title="Your Location"
+            description="You are here"
+          >
+            <View style={styles.userMarkerContainer}>
+              <View style={styles.userMarkerOuter}>
                 <View style={styles.userMarkerInner} />
               </View>
-            </Marker>
-
-            {/* Radius Circle */}
-            {showRadius && (
-              <Circle
-                center={userLocation}
-                radius={radiusKm * 1000}
-                fillColor="rgba(91, 95, 255, 0.1)"
-                strokeColor="rgba(91, 95, 255, 0.5)"
-                strokeWidth={2}
-              />
-            )}
-          </>
+            </View>
+          </Marker>
         )}
 
-        {/* Other Markers */}
+        {showRadius && (
+          <Circle
+            center={userLocation}
+            radius={radiusKm * 1000}
+            fillColor="rgba(91, 95, 255, 0.1)"
+            strokeColor="rgba(91, 95, 255, 0.3)"
+            strokeWidth={2}
+          />
+        )}
+
         {markers.map((marker) => (
           <Marker
             key={marker.id}
-            coordinate={{
-              latitude: marker.latitude,
-              longitude: marker.longitude,
-            }}
+            coordinate={{ latitude: marker.latitude, longitude: marker.longitude }}
             title={marker.title}
-            onPress={() => handleMarkerPress(marker)}
+            description={marker.description}
+            onPress={() => {
+              marker.onPress?.(marker);
+              onMarkerPress?.(marker);
+            }}
           >
-            <View
-              style={[
-                styles.markerContainer,
-                { backgroundColor: marker.color || markerColors[marker.type || 'user'] },
-              ]}
-            >
-              <Text style={styles.markerEmoji}>{getMarkerIcon(marker.type)}</Text>
-            </View>
-
-            {/* Callout with info */}
-            <Callout tooltip={true}>
+            {renderCustomMarker(marker)}
+            <Callout>
               <View style={styles.calloutContainer}>
                 <Text style={styles.calloutTitle}>{marker.title}</Text>
                 {marker.description && (
@@ -246,129 +220,164 @@ export default function GoogleMap({
         ))}
       </MapView>
 
-      {/* Map Controls */}
-      <View style={styles.controls}>
-        <TouchableOpacity
-          style={styles.controlButton}
-          onPress={() => mapRef.current?.animateToRegion({
-            latitude: userLocation.latitude,
-            longitude: userLocation.longitude,
-            latitudeDelta: 0.05,
-            longitudeDelta: 0.05,
-          })}
-        >
-          <MaterialIcons name="my-location" size={24} color="#5B5FFF" />
+      <View style={styles.fabContainer}>
+        <TouchableOpacity style={styles.fabButton} onPress={centerOnUser}>
+          <MaterialIcons name="my-location" size={22} color="#5B5FFF" />
         </TouchableOpacity>
       </View>
 
-      {/* Legend */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: markerColors.doctor }]} />
-          <Text style={styles.legendText}>Doctor</Text>
+          <View style={[styles.legendDot, { backgroundColor: markerColors.doctor }]} />
+          <Text style={styles.legendText}>Doctors</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: markerColors.nurse }]} />
-          <Text style={styles.legendText}>Nurse</Text>
+          <View style={[styles.legendDot, { backgroundColor: markerColors.nurse }]} />
+          <Text style={styles.legendText}>Nurses</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: markerColors.ambulance }]} />
-          <Text style={styles.legendText}>Ambulance</Text>
+          <View style={[styles.legendDot, { backgroundColor: markerColors.ambulance }]} />
+          <Text style={styles.legendText}>Ambulances</Text>
         </View>
       </View>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  mapContainer: {
-    width: '100%',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginVertical: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  map: {
-    flex: 1,
-  },
   container: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FF',
+    backgroundColor: '#f5f5f5',
     borderRadius: 12,
+    overflow: 'hidden',
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
   },
   errorText: {
+    marginTop: 12,
+    fontSize: 14,
     color: '#999',
-    fontSize: 16,
-    textAlign: 'center',
   },
-  userMarker: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(76, 175, 80, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: '#4CAF50',
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: '#5B5FFF',
+    borderRadius: 8,
   },
-  userMarkerInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4CAF50',
+  retryText: {
+    color: '#fff',
+    fontWeight: '600',
   },
   markerContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    alignItems: 'center',
+  },
+  markerBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+    borderWidth: 3,
+    borderColor: '#fff',
   },
-  markerEmoji: {
-    fontSize: 24,
+  markerIcon: {
+    fontSize: 20,
+  },
+  markerArrow: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    marginTop: -1,
+  },
+  userMarkerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userMarkerOuter: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(91, 95, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userMarkerInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#5B5FFF',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   calloutContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 10,
-    minWidth: 150,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
+    padding: 8,
+    minWidth: 120,
   },
   calloutTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1a1a1a',
+    marginBottom: 4,
   },
   calloutDescription: {
     fontSize: 12,
     color: '#666',
-    marginTop: 4,
   },
-  controls: {
+  legend: {
     position: 'absolute',
-    bottom: 100,
-    right: 12,
-    gap: 8,
+    bottom: 16,
+    left: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    gap: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  controlButton: {
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  legendText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#333',
+  },
+  fabContainer: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+  },
+  fabButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -377,33 +386,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  legend: {
-    position: 'absolute',
-    bottom: 12,
-    left: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 8,
-    padding: 8,
-    flexDirection: 'row',
-    gap: 12,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '500',
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 4,
   },
 });
+
+export default GoogleMap;
+

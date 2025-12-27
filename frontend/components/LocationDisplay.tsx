@@ -272,7 +272,7 @@ export const LocationDisplay: React.FC<LocationDisplayProps> = ({
 
       {/* Google Maps Link */}
       {location && (
-        <View style={[styles.card, { backgroundColor: colors.card }]}>
+        <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>
             View on Map
           </Text>
@@ -292,7 +292,7 @@ export const LocationDisplay: React.FC<LocationDisplayProps> = ({
 
       {/* Location History */}
       {locationHistory.length > 0 && (
-        <View style={[styles.card, { backgroundColor: colors.card }]}>
+        <View style={[styles.card, { backgroundColor: colors.cardBackground }]}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>
             Location History
           </Text>
@@ -303,7 +303,7 @@ export const LocationDisplay: React.FC<LocationDisplayProps> = ({
                 styles.historyItem,
                 index !== locationHistory.length - 1 && {
                   borderBottomWidth: 1,
-                  borderBottomColor: colors.border,
+                  borderBottomColor: colors.cardBorder,
                 },
               ]}>
               <View style={styles.historyLeft}>

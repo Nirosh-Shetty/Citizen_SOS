@@ -11,7 +11,7 @@ import {
   Dimensions,
   Animated,
   Image,
-  ImageBackground,
+    RefreshControl,
   useColorScheme,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -38,10 +38,11 @@ export default function HomeScreen() {
   const { user, updateLocation } = useAuth();
   const colorScheme = useColorScheme();
   const colors = colorScheme === 'dark' ? Colors.dark : Colors.light;
-  
+
   const [location, setLocation] = useState<any>(null);
   const [loadingEmergency, setLoadingEmergency] = useState(false);
   const [sosActive, setSosActive] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [nearbyData, setNearbyData] = useState<{
     doctors: Array<{ id: string; name: string; distance?: number; [key: string]: any }> ;
     nurses: Array<{ id: string; name: string; distance?: number; [key: string]: any }>;
@@ -119,7 +120,12 @@ export default function HomeScreen() {
   };
 
   const fetchNearbyServices = async () => {
-    if (!location) return;
+    if (!location) {
+      // Use fallback location if user location not available
+      const fallbackLocation = { latitude: 28.7041, longitude: 77.1025 };
+      setLocation(fallbackLocation);
+      return;
+    }
 
     try {
       const [doctors, nurses, ambulances, volunteers] = await Promise.all([
@@ -139,6 +145,15 @@ export default function HomeScreen() {
     } catch (error) {
       console.error('Error fetching nearby services:', error);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      fetchNearbyServices(),
+      fetchUpcomingAppointments(),
+    ]);
+    setRefreshing(false);
   };
 
   const fetchUpcomingAppointments = async () => {
@@ -225,84 +240,98 @@ export default function HomeScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
       >
         {/* Enhanced Header Section */}
         <View style={[styles.header, { backgroundColor: colors.gradientStart }]}>
           <View>
-            <Text style={styles.greeting}>Welcome back</Text>
-            <Text style={[styles.userName, { color: '#FFFFFF' }]}>{user?.name || 'User'}</Text>
+            <Text style={styles.greeting}>Welcome back 👋</Text>
+            <Text style={[styles.userName, { color: '#FFFFFF' }]}>
+              {user?.name || 'User'}
+            </Text>
+            <Text style={styles.subGreeting}>How are you feeling today?</Text>
           </View>
           <TouchableOpacity
             style={[styles.profileButton, { backgroundColor: colors.secondary }]}
             onPress={() => router.push('/profile')}
           >
-            <MaterialIcons name="person" size={24} color="#fff" />
+            <MaterialIcons name="person" size={28} color="#fff" />
           </TouchableOpacity>
         </View>
 
         {/* Dashboard Stats Section */}
-        <Dashboard
-          stats={[
-            {
-              icon: 'heart-pulse',
-              label: 'Health Score',
-              value: '92',
-              color: colors.primary,
-              accentColor: colors.gradientEnd,
-            },
-            {
-              icon: 'run',
-              label: 'Activity',
-              value: '7.2k',
-              color: colors.secondary,
-              accentColor: colors.secondaryGradientEnd,
-            },
-            {
-              icon: 'water-percent',
-              label: 'Hydration',
-              value: '85%',
-              color: colors.accent,
-              accentColor: '#FF8555',
-            },
-            {
-              icon: 'sleep',
-              label: 'Sleep',
-              value: '7.5h',
-              color: colors.danger,
-              accentColor: '#FF3366',
-            },
-          ]}
-          colors={{ light: colors }}
-          onStatPress={(index) => {
-            const labels = ['Health', 'Activity', 'Hydration', 'Sleep'];
-            Alert.alert(labels[index], `Your ${labels[index].toLowerCase()} metrics`);
-          }}
-        />
-
-        {/* SOS Emergency Button */}
-        <SOSButton
-          isActive={sosActive}
-          onPress={handleSOS}
-          onCancel={() => {
-            setSosActive(false);
-            socketRef.current?.emit('emergency-cancel', {
-              victimId: user?.id,
-            });
-          }}
-          colors={{ light: colors }}
-        />
-
-        {/* SOS Demo Button */}
-        <View style={styles.sosDemoContainer}>
-          <TouchableOpacity
-            style={[styles.sosDemoButton, { backgroundColor: colors.primary }]}
-            onPress={() => router.push('/emergency/sos-demo')}>
-            <MaterialIcons name="emergency" size={20} color="#fff" />
-            <Text style={styles.sosDemoButtonText}>View SOS Demo & Features</Text>
-          </TouchableOpacity>
+        <View style={styles.statsContainer}>
+          <Dashboard
+            stats={[
+              {
+                icon: 'heart-pulse',
+                label: 'Health Score',
+                value: '92',
+                color: '#FF6B6B',
+                accentColor: '#FF5252',
+              },
+              {
+                icon: 'run',
+                label: 'Activity',
+                value: '7.2k',
+                color: '#4ECDC4',
+                accentColor: '#44B3AB',
+              },
+              {
+                icon: 'water-percent',
+                label: 'Hydration',
+                value: '85%',
+                color: '#5B9AFF',
+                accentColor: '#4A89F0',
+              },
+              {
+                icon: 'sleep',
+                label: 'Sleep',
+                value: '7.5h',
+                color: '#9B59B6',
+                accentColor: '#8E44AD',
+              },
+            ]}
+            colors={{ light: colors }}
+            onStatPress={(index) => {
+              const labels = ['Health', 'Activity', 'Hydration', 'Sleep'];
+              Alert.alert(labels[index], `Your ${labels[index].toLowerCase()} metrics`);
+            }}
+          />
         </View>
 
+        {/* SOS Emergency Button */}
+        <View style={styles.sosContainer}>
+          <Text style={[styles.sosTitle, { color: colors.text }]}>Emergency SOS</Text>
+          <Text style={[styles.sosSubtitle, { color: colors.icon }]}>
+            Press and hold for immediate help
+          </Text>
+          <SOSButton
+            isActive={sosActive}
+            onPress={handleSOS}
+            onCancel={() => {
+              setSosActive(false);
+              socketRef.current?.emit('emergency-cancel', {
+                victimId: user?.id,
+              });
+            }}
+            colors={{ light: colors }}
+          />
+        </View>
+
+        {/* SOS Demo Button */}
+
         {/* Quick Actions */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
+          </View>
         <QuickActions
           actions={[
             {
@@ -327,18 +356,18 @@ export default function HomeScreen() {
               accentColor: colors.secondaryGradientEnd,
             },
             {
-              id: 'web-location',
-              icon: 'location-on',
-              label: 'Web Location',
-              color: '#06B6D4',
-              accentColor: '#0891B2',
-            },
-            {
               id: 'health-records',
               icon: 'file-document-outline',
               label: 'Health Records',
               color: '#9C27B0',
               accentColor: '#7B1FA2',
+            },
+            {
+              id: 'view-map',
+              icon: 'map-marker-radius',
+              label: 'View Map',
+              color: '#06B6D4',
+              accentColor: '#0891B2',
             },
           ]}
           colors={{ light: colors }}
@@ -351,10 +380,10 @@ export default function HomeScreen() {
                 router.push('/ambulance/book');
                 break;
               case 'find-nearby':
-                router.push('/nearby');
+                router.push('/doctors/map');
                 break;
-              case 'web-location':
-                router.push('/nearby/web-location');
+              case 'view-map':
+                router.push('/doctors/map');
                 break;
               case 'health-records':
                 router.push('/profile');
@@ -365,6 +394,18 @@ export default function HomeScreen() {
 
         {/* Appointments Section */}
         {upcomingAppointments.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Upcoming Appointments
+                </Text>
+                <TouchableOpacity onPress={() => router.push('/appointments')}>
+                  <Text style={[styles.seeAll, { color: colors.primary }]}>See All</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          {upcomingAppointments.length > 0 && (
           <AppointmentsList
             appointments={upcomingAppointments.map((apt: any, index: number) => ({
               id: apt._id,
@@ -389,9 +430,14 @@ export default function HomeScreen() {
         {/* Nearby Doctors */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Nearby Doctors</Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                👨‍⚕️ Nearby Doctors
+              </Text>
             <TouchableOpacity onPress={() => router.push('/doctors/map')}>
-              <Text style={[styles.seeAll, { color: colors.primary }]}>Map View</Text>
+                <View style={styles.mapViewButton}>
+                  <MaterialIcons name="map" size={16} color={colors.primary} />
+                  <Text style={[styles.seeAll, { color: colors.primary }]}>Map View</Text>
+                </View>
             </TouchableOpacity>
           </View>
           {nearbyData.doctors.length > 0 ? (
@@ -429,7 +475,16 @@ export default function HomeScreen() {
           ) : (
             <View style={styles.emptyState}>
               <MaterialIcons name="location-off" size={48} color={colors.icon} />
-              <Text style={[styles.emptyStateText, { color: colors.text }]}>No doctors nearby</Text>
+                <Text style={[styles.emptyStateText, { color: colors.text }]}>
+                  No doctors found nearby
+                </Text>
+                <TouchableOpacity
+                  style={[styles.refreshButton, { backgroundColor: colors.primary }]}
+                  onPress={fetchNearbyServices}
+                >
+                  <MaterialIcons name="refresh" size={16} color="#fff" />
+                  <Text style={styles.refreshButtonText}>Refresh</Text>
+                </TouchableOpacity>
             </View>
           )}
         </View>
@@ -438,7 +493,9 @@ export default function HomeScreen() {
         {nearbyData.nurses.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Nearby Nurses</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  👩‍⚕️ Nearby Nurses
+                </Text>
             </View>
             {nearbyData.nurses.map((nurse: any, index: number) => (
               <View key={nurse._id || index} style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}>
@@ -475,7 +532,9 @@ export default function HomeScreen() {
         {nearbyData.ambulances.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Ambulances</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  🚑 Available Ambulances
+                </Text>
             </View>
             {nearbyData.ambulances.map((ambulance: any, index: number) => (
               <View key={ambulance._id || index} style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}>
@@ -510,7 +569,9 @@ export default function HomeScreen() {
         {nearbyData.volunteers.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Nearby Volunteers</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  🤝 Nearby Volunteers
+                </Text>
             </View>
             {nearbyData.volunteers.map((volunteer: any, index: number) => (
               <View key={volunteer._id || index} style={[styles.professionalCard, { backgroundColor: colors.background, borderColor: colors.cardBorder }]}>
@@ -590,20 +651,43 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 4,
   },
+    subGreeting: {
+      fontSize: 13,
+      color: 'rgba(255, 255, 255, 0.7)',
+      marginTop: 4,
+    },
   profileButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+      width: 54,
+      height: 54,
+      borderRadius: 27,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
+      elevation: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+      shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
-    shadowRadius: 4,
+      shadowRadius: 6,
   },
 
   // Section Styles
+    statsContainer: {
+      marginTop: -20,
+      paddingHorizontal: 16,
+    },
+    sosContainer: {
+      paddingHorizontal: 16,
+      alignItems: 'center',
+      marginVertical: 20,
+    },
+    sosTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      marginBottom: 4,
+    },
+    sosSubtitle: {
+      fontSize: 13,
+      marginBottom: 12,
+    },
   section: {
     paddingHorizontal: 16,
     marginBottom: 24,
@@ -615,32 +699,37 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: 'bold',
   },
   seeAll: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
+  },
+  mapViewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
 
   // Professional Card
   professionalCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
+      padding: 14,
+      borderRadius: 16,
     marginBottom: 10,
     borderWidth: 1,
-    elevation: 2,
+      elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.15,
+      shadowRadius: 4,
   },
   professionalAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -649,12 +738,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   professionalName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     marginBottom: 4,
   },
   professionalSpec: {
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 2,
   },
   ratingContainer: {
@@ -672,32 +761,19 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   bookBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
   bookBtnText: {
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  sosDemoContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  sosDemoButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    gap: 8,
-  },
-  sosDemoButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+      fontWeight: '700',
+      fontSize: 13,
   },
 
   // Empty State
@@ -710,19 +786,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
   },
+    refreshButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      gap: 6,
+    },
+    refreshButtonText: {
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '600',
+    },
 
   // Health Tip Card
   healthTipCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
+      padding: 18,
+      borderRadius: 16,
     borderWidth: 1,
-    elevation: 2,
+      elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.15,
+      shadowRadius: 4,
   },
   healthTipIcon: {
     marginRight: 12,
@@ -734,12 +824,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   healthTipTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     marginBottom: 4,
   },
   healthTipDesc: {
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 4,
     lineHeight: 18,
   },

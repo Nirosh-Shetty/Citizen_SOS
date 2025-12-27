@@ -14,7 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { usersAPI } from '../../utils/api';
+import { usersAPI, locationAPI } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import GoogleMap from '../../components/GoogleMap';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -27,6 +27,9 @@ export default function NearbyFacilitiesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [radius, setRadius] = useState(10);
   const [facilities, setFacilities] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [nurses, setNurses] = useState<any[]>([]);
+  const [ambulances, setAmbulances] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [userLocation, setUserLocation] = useState<any>(null);
@@ -46,16 +49,28 @@ export default function NearbyFacilitiesScreen() {
     }
   }, [activeTab, radius, userLocation]);
 
-  const generateMapMarkers = (facilities: any[]) => {
-    return facilities.map((facility, index) => ({
-      id: facility.id || `marker-${index}`,
-      latitude: facility.latitude || userLocation?.latitude + (Math.random() - 0.5) * 0.05,
-      longitude: facility.longitude || userLocation?.longitude + (Math.random() - 0.5) * 0.05,
-      title: facility.name,
-      description: facility.specialization,
-      type: activeTab,
-      facility: facility,
-    }));
+  const generateMapMarkers = (lists: { doctors?: any[]; nurses?: any[]; ambulances?: any[] }) => {
+    const markers: any[] = [];
+    const addList = (items: any[], type: 'doctors' | 'nurses' | 'ambulances') => {
+      items.forEach((facility: any, index: number) => {
+        const lat = facility.latitude ?? userLocation?.latitude;
+        const lon = facility.longitude ?? userLocation?.longitude;
+        if (!lat || !lon) return;
+        markers.push({
+          id: facility.id || facility._id || `${type}-${index}`,
+          latitude: lat,
+          longitude: lon,
+          title: facility.name || facility.operatorName || 'Unknown',
+          description: facility.specialization || facility.vehicleNumber || '',
+          type: type === 'ambulances' ? 'ambulance' : type.slice(0, -1),
+          facility,
+        });
+      });
+    };
+    if (lists.doctors) addList(lists.doctors, 'doctors');
+    if (lists.nurses) addList(lists.nurses, 'nurses');
+    if (lists.ambulances) addList(lists.ambulances, 'ambulances');
+    return markers;
   };
 
   const initializeLocation = async () => {
@@ -71,6 +86,18 @@ export default function NearbyFacilitiesScreen() {
       });
 
       setUserLocation(loc.coords);
+
+      // Persist to backend location history
+      try {
+        await locationAPI.updateLocation(
+          loc.coords.latitude,
+          loc.coords.longitude,
+          '',
+          loc.coords.accuracy || 0
+        );
+      } catch (e) {
+        // Non-blocking: ignore persistence errors
+      }
     } catch (error) {
       console.error('Location error:', error);
       Alert.alert('Error', 'Could not get your location');
@@ -82,24 +109,39 @@ export default function NearbyFacilitiesScreen() {
 
     setLoading(true);
     try {
-      let response;
       const { latitude, longitude } = userLocation;
+      const [docRes, nurseRes, ambRes] = await Promise.all([
+        usersAPI.getNearbyProfessionals('doctor', latitude, longitude, radius),
+        usersAPI.getNearbyProfessionals('nurse', latitude, longitude, radius),
+        usersAPI.getNearbyAmbulances(latitude, longitude, radius),
+      ]);
 
-      if (activeTab === 'doctors' || activeTab === 'nurses') {
-        response = await usersAPI.getNearbyProfessionals(activeTab, latitude, longitude, radius);
-      } else {
-        response = await usersAPI.getNearbyAmbulances(latitude, longitude, radius);
-      }
+      const docs = docRes.data || [];
+      const nurs = nurseRes.data || [];
+      const ambs = ambRes.data || [];
+      setDoctors(docs);
+      setNurses(nurs);
+      setAmbulances(ambs);
 
-      const data = response.data || [];
-      setFacilities(data);
-      setMapMarkers(generateMapMarkers(data));
+      // Set list for active tab
+      const currentList = activeTab === 'doctors' ? docs : activeTab === 'nurses' ? nurs : ambs;
+      setFacilities(currentList);
+
+      // Build combined markers for map
+      setMapMarkers(generateMapMarkers({ doctors: docs, nurses: nurs, ambulances: ambs }));
     } catch (error) {
       console.error('Error fetching facilities:', error);
       // Use mock data as fallback
       const mockData = getMockData();
       setFacilities(mockData);
-      setMapMarkers(generateMapMarkers(mockData));
+      // Fallback markers only for active tab
+      const combined =
+        activeTab === 'doctors'
+          ? { doctors: mockData }
+          : activeTab === 'nurses'
+          ? { nurses: mockData }
+          : { ambulances: mockData };
+      setMapMarkers(generateMapMarkers(combined));
     } finally {
       setLoading(false);
     }
@@ -246,6 +288,20 @@ export default function NearbyFacilitiesScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Nearby Facilities</Text>
         <Text style={styles.subtitle}>Find doctors, nurses & ambulances</Text>
+        <View style={styles.countsRow}>
+          <View style={styles.countChip}>
+            <Text style={styles.countLabel}>Doctors</Text>
+            <Text style={styles.countValue}>{doctors.length}</Text>
+          </View>
+          <View style={styles.countChip}>
+            <Text style={styles.countLabel}>Nurses</Text>
+            <Text style={styles.countValue}>{nurses.length}</Text>
+          </View>
+          <View style={styles.countChip}>
+            <Text style={styles.countLabel}>Ambulances</Text>
+            <Text style={styles.countValue}>{ambulances.length}</Text>
+          </View>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -375,13 +431,17 @@ export default function NearbyFacilitiesScreen() {
           {userLocation && (
             <GoogleMap
               initialRegion={{
-                latitude: selectedFacility?.latitude || userLocation.latitude,
-                longitude: selectedFacility?.longitude || userLocation.longitude,
+                latitude: (selectedFacility?.latitude ?? userLocation.latitude),
+                longitude: (selectedFacility?.longitude ?? userLocation.longitude),
                 latitudeDelta: 0.0922,
                 longitudeDelta: 0.0421,
               }}
-              markers={selectedFacility ? [selectedFacility] : mapMarkers}
-              userLocation={userLocation}
+              markers={selectedFacility ? generateMapMarkers({
+                [activeTab]: [selectedFacility]
+              }) : mapMarkers}
+              showRadius
+              radiusKm={radius}
+              showUserLocation
             />
           )}
 
@@ -457,6 +517,30 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   searchInput: {
+  countsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  countChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 6,
+  },
+  countLabel: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '600',
+  },
+  countValue: {
+    fontSize: 12,
+    color: '#5B5FFF',
+    fontWeight: '700',
+  },
     flex: 1,
     borderWidth: 1,
     borderColor: '#E8E8E8',

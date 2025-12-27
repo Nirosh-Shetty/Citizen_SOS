@@ -131,7 +131,7 @@ export default function WebLocationScreen() {
         </LinearGradient>
 
         {/* Quick Status Card */}
-        <View style={[styles.quickStatusCard, { backgroundColor: colors.card }]}>
+        <View style={[styles.quickStatusCard, { backgroundColor: colors.cardBackground }]}>
           <View style={styles.statusIndicator}>
             {loading ? (
               <ActivityIndicator size="small" color={colors.primary} />
@@ -165,7 +165,7 @@ export default function WebLocationScreen() {
         </View>
 
         {/* Emergency Actions */}
-        <View style={[styles.section, { backgroundColor: colors.card }]}>
+        <View style={[styles.section, { backgroundColor: colors.cardBackground }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
             Emergency Actions
           </Text>
@@ -228,7 +228,7 @@ export default function WebLocationScreen() {
                   key={ambulance._id}
                   style={[
                     styles.serviceCard,
-                    { backgroundColor: colors.card, borderLeftColor: '#F97316' },
+                    { backgroundColor: colors.cardBackground, borderLeftColor: '#F97316' },
                   ]}>
                   <View>
                     <Text style={[styles.serviceName, { color: colors.text }]}>
@@ -266,7 +266,7 @@ export default function WebLocationScreen() {
                   key={nurse._id}
                   style={[
                     styles.serviceCard,
-                    { backgroundColor: colors.card, borderLeftColor: '#8B5CF6' },
+                    { backgroundColor: colors.cardBackground, borderLeftColor: '#8B5CF6' },
                   ]}>
                   <View>
                     <Text style={[styles.serviceName, { color: colors.text }]}>
@@ -304,7 +304,7 @@ export default function WebLocationScreen() {
                   key={doctor._id}
                   style={[
                     styles.serviceCard,
-                    { backgroundColor: colors.card, borderLeftColor: '#3B82F6' },
+                    { backgroundColor: colors.cardBackground, borderLeftColor: '#3B82F6' },
                   ]}>
                   <View>
                     <Text style={[styles.serviceName, { color: colors.text }]}>

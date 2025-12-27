@@ -9,58 +9,87 @@ const authMiddleware = require('../middleware/auth');
 router.post('/trigger', authMiddleware, async (req, res) => {
   try {
     const { latitude, longitude, description, emergencyContactId, severity = 'high' } = req.body;
-    
+    if (!latitude || !longitude || !description) {
+      return res.status(400).json({ error: 'Missing required fields: latitude, longitude, description' });
+    }
     const victim = await User.findById(req.userId);
-    const emergencyContact = emergencyContactId ? await User.findById(emergencyContactId) : null;
-
+    if (!victim) {
+      return res.status(404).json({ error: 'Victim user not found' });
+    }
+    let emergencyContact = null;
+    if (emergencyContactId) {
+      emergencyContact = await User.findById(emergencyContactId);
+      if (!emergencyContact) {
+        return res.status(404).json({ error: 'Emergency contact not found' });
+      }
+    }
     // Create emergency record
     const emergency = new Emergency({
       victimId: req.userId,
       victimName: victim.name,
       emergencyContactId,
-      emergencyContactPhone: emergencyContact?.phone || victim.emergencyContacts[0]?.phone,
+      emergencyContactPhone: emergencyContact?.phone || (victim.emergencyContacts && victim.emergencyContacts[0]?.phone) || '',
       latitude,
       longitude,
       description,
       severity,
       status: 'active'
     });
-
-    await emergency.save();
-
+    try {
+      await emergency.save();
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to save emergency: ' + err.message });
+    }
     // Save location
-    const location = new Location({
-      userId: req.userId,
-      latitude,
-      longitude,
-      emergencyId: emergency._id,
-      timestamp: new Date()
-    });
-    await location.save();
-
+    try {
+      const location = new Location({
+        userId: req.userId,
+        latitude,
+        longitude,
+        emergencyId: emergency._id,
+        timestamp: new Date()
+      });
+      await location.save();
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to save location: ' + err.message });
+    }
     // Find and assign nearest ambulance
-    const nearestAmbulance = await findNearestAmbulance(latitude, longitude);
-    if (nearestAmbulance) {
-      emergency.assignedAmbulanceId = nearestAmbulance._id;
+    try {
+      const nearestAmbulance = await findNearestAmbulance(latitude, longitude);
+      if (nearestAmbulance) {
+        emergency.assignedAmbulanceId = nearestAmbulance._id;
+      }
+    } catch (err) {
+      // log but don't block
+      console.error('Error finding nearest ambulance:', err);
     }
-
     // Find and assign nearest nurse
-    const nearestNurse = await findNearestProfessional(latitude, longitude, 'nurse');
-    if (nearestNurse) {
-      emergency.assignedNurseId = nearestNurse._id;
+    try {
+      const nearestNurse = await findNearestProfessional(latitude, longitude, 'nurse');
+      if (nearestNurse) {
+        emergency.assignedNurseId = nearestNurse._id;
+      }
+    } catch (err) {
+      console.error('Error finding nearest nurse:', err);
     }
-
     // Alert nearby volunteers
-    const volunteers = await findNearbyVolunteers(latitude, longitude);
-    emergency.alertedVolunteerIds = volunteers.map(v => v._id);
-
-    await emergency.save();
-
+    try {
+      const volunteers = await findNearbyVolunteers(latitude, longitude);
+      emergency.alertedVolunteerIds = volunteers.map(v => v._id);
+    } catch (err) {
+      console.error('Error finding nearby volunteers:', err);
+    }
+    try {
+      await emergency.save();
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to update emergency: ' + err.message });
+    }
     res.status(201).json({
       message: 'Emergency alert triggered',
       emergency: await emergency.populate(['assignedAmbulanceId', 'assignedNurseId', 'alertedVolunteerIds'])
     });
   } catch (error) {
+    console.error('Emergency trigger error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -90,17 +119,29 @@ router.get('/nearby', authMiddleware, async (req, res) => {
 router.put('/:emergencyId', authMiddleware, async (req, res) => {
   try {
     const { status } = req.body;
-    const emergency = await Emergency.findByIdAndUpdate(
-      req.params.emergencyId,
-      { 
-        status,
-        completedAt: status === 'completed' ? new Date() : undefined 
-      },
-      { new: true }
-    ).populate(['victimId', 'assignedAmbulanceId', 'assignedNurseId']);
-
+    if (!status) {
+      return res.status(400).json({ error: 'Missing required field: status' });
+    }
+    let update = { status };
+    if (status === 'completed') {
+      update.completedAt = new Date();
+    }
+    let emergency;
+    try {
+      emergency = await Emergency.findByIdAndUpdate(
+        req.params.emergencyId,
+        update,
+        { new: true }
+      ).populate(['victimId', 'assignedAmbulanceId', 'assignedNurseId']);
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to update emergency: ' + err.message });
+    }
+    if (!emergency) {
+      return res.status(404).json({ error: 'Emergency not found' });
+    }
     res.json({ message: 'Emergency updated', emergency });
   } catch (error) {
+    console.error('Emergency update error:', error);
     res.status(500).json({ error: error.message });
   }
 });
