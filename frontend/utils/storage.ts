@@ -57,4 +57,48 @@ export const storageService = {
       console.error('Error clearing auth data:', error);
     }
   },
+
+  // Appointments local cache (native)
+  appendAppointment: async (appointment: any) => {
+    try {
+      const raw = await AsyncStorage.getItem('appointments');
+      const list = raw ? JSON.parse(raw) : [];
+      list.unshift(appointment);
+      await AsyncStorage.setItem('appointments', JSON.stringify(list.slice(0, 50)));
+    } catch (error) {
+      console.error('Error caching appointment:', error);
+    }
+  },
+
+  getAppointments: async (): Promise<any[]> => {
+    try {
+      const raw = await AsyncStorage.getItem('appointments');
+      return raw ? JSON.parse(raw) : [];
+    } catch (error) {
+      console.error('Error reading appointments:', error);
+      return [];
+    }
+  },
+
+  // Bookings local cache (native)
+  appendBooking: async (booking: any) => {
+    try {
+      const raw = await AsyncStorage.getItem('bookings');
+      const list = raw ? JSON.parse(raw) : [];
+      list.unshift(booking);
+      await AsyncStorage.setItem('bookings', JSON.stringify(list.slice(0, 50)));
+    } catch (error) {
+      console.error('Error caching booking:', error);
+    }
+  },
+
+  getBookings: async (): Promise<any[]> => {
+    try {
+      const raw = await AsyncStorage.getItem('bookings');
+      return raw ? JSON.parse(raw) : [];
+    } catch (error) {
+      console.error('Error reading bookings:', error);
+      return [];
+    }
+  },
 };

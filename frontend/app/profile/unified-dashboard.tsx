@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { useAuth } from '../../context/AuthContext';
 import { appointmentsAPI, bookingAPI, locationAPI, usersAPI } from '../../utils/api';
+import { storageService } from '../../utils/storage';
 import { Colors } from '../../constants/theme';
 
 interface Appointment {
@@ -74,8 +75,20 @@ export default function UnifiedDashboardScreen() {
         bookingAPI.getUserBookings(user.id),
         locationAPI.getCurrentLocation(user.id),
       ]);
-      setAppointments(appointmentsRes.data || []);
-      setBookings(bookingsRes.data || []);
+      const localApts = await storageService.getAppointments();
+      const localBookings = await storageService.getBookings();
+      const remoteApts = Array.isArray(appointmentsRes.data) ? appointmentsRes.data : [];
+      const remoteBookings = Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
+      const mergeUnique = (arr1: any[], arr2: any[], key: string = '_id') => {
+        const map = new Map<string, any>();
+        [...arr1, ...arr2].forEach((item) => {
+          const id = item[key] || `${item.scheduledTime || item.appointmentDate}-${item.timeSlot || item.serviceType}`;
+          if (!map.has(id)) map.set(id, item);
+        });
+        return Array.from(map.values());
+      };
+      setAppointments(mergeUnique(localApts || [], remoteApts));
+      setBookings(mergeUnique(localBookings || [], remoteBookings));
       setLocation(locationRes.data || null);
     } catch (error) {
       console.error('Error fetching data:', error);
