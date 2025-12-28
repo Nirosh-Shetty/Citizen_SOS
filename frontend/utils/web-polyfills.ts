@@ -1,5 +1,15 @@
 import { View, Text, StyleSheet, Platform } from 'react-native';
 
+// Extend Window interface for web location service
+declare global {
+  interface Window {
+    __webLocationService?: {
+      isGeolocationSupported: () => boolean;
+      isPermissionsAPISupported: () => boolean;
+    };
+  }
+}
+
 // Platform detection utilities for web
 export const isWeb = Platform.OS === 'web';
 
