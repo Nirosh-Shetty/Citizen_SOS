@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { appointmentsAPI } from '../../utils/api';
+import { storageService } from '../../utils/storage';
 import { Alert } from 'react-native';
 
 interface Appointment {
@@ -36,10 +37,21 @@ export default function AppointmentsScreen() {
 
   const fetchAppointments = async () => {
     try {
+      let merged: Appointment[] = [];
+      const local = await storageService.getAppointments();
+      if (Array.isArray(local)) merged = local as Appointment[];
       if (user?.id) {
         const response = await appointmentsAPI.getUserAppointments(user.id);
-        setAppointments(response.data);
+        const remote = Array.isArray(response.data) ? response.data : [];
+        // Merge local first then remote unique by _id
+        const byId = new Map<string, Appointment>();
+        [...merged, ...remote].forEach((item: any) => {
+          const id = item._id || `${item.appointmentDate}-${item.timeSlot}`;
+          if (!byId.has(id)) byId.set(id, item);
+        });
+        merged = Array.from(byId.values());
       }
+      setAppointments(merged);
     } catch (error) {
       console.error('Error fetching appointments:', error);
     } finally {

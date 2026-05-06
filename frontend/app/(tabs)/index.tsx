@@ -57,7 +57,7 @@ export default function HomeScreen() {
       icon: 'stethoscope',
       color: 'rgba(91,149,255,0.12)',
       accent: colors.primary,
-      target: '/appointments/book',
+      target: '/doctors/list',
     },
     {
       id: 'nurse',
@@ -66,7 +66,7 @@ export default function HomeScreen() {
       icon: 'account-heart',
       color: 'rgba(16,185,129,0.12)',
       accent: colors.secondary,
-      target: '/appointments/book',
+      target: '/appointments/nurse/book',
     },
     {
       id: 'ambulance',
@@ -290,7 +290,7 @@ export default function HomeScreen() {
           </Text>
           <ModernButton
             title="Book Now"
-            onPress={() => router.push('/appointments/book')}
+            onPress={() => router.push('/doctors/list')}
             variant="secondary"
             size="large"
             style={styles.heroButton}
@@ -385,10 +385,10 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>👨‍⚕️ Nearby Doctors</Text>
-            <TouchableOpacity onPress={() => router.push('/doctors/map')}>
+            <TouchableOpacity onPress={() => router.push('/doctors/list')}>
               <View style={styles.mapViewButton}>
-                <MaterialIcons name="map" size={16} color={colors.primary} />
-                <Text style={[styles.seeAll, { color: colors.primary }]}>Map View</Text>
+                <MaterialIcons name="list" size={16} color={colors.primary} />
+                <Text style={[styles.seeAll, { color: colors.primary }]}>View All</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -418,12 +418,12 @@ export default function HomeScreen() {
                   style={[styles.bookBtn, { backgroundColor: colors.primary }]}
                   onPress={() =>
                     router.push({
-                      pathname: '/appointments/book',
-                      params: { professionalId: doctor._id },
+                      pathname: '/doctors/[id]',
+                      params: { id: doctor._id, doctorData: JSON.stringify(doctor) },
                     })
                   }
                 >
-                  <Text style={styles.bookBtnText}>Book</Text>
+                  <Text style={styles.bookBtnText}>View</Text>
                 </TouchableOpacity>
               </View>
             ))

@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { useAuth } from '../../context/AuthContext';
 import { usersAPI, bookingAPI } from '../../utils/api';
+import { storageService } from '../../utils/storage';
 
 interface Ambulance {
   _id: string;
@@ -71,9 +72,18 @@ export default function BookAmbulanceScreen() {
         description: 'Ambulance booking for non-emergency transport',
         amount: 0,
       };
-      await bookingAPI.bookService(bookingData);
+      const res = await bookingAPI.bookService(bookingData);
+      const saved = res?.data || bookingData;
+      try {
+        await storageService.appendBooking({
+          ...(saved || {}),
+          _id: saved?._id || `${Date.now()}`,
+          status: saved?.status || 'pending',
+          scheduledTime: saved?.scheduledTime || new Date().toISOString(),
+        });
+      } catch {}
       Alert.alert('Success', 'Ambulance booked successfully');
-      router.back();
+      router.push('/profile/unified-dashboard');
     } catch (error) {
       console.error('Error booking ambulance:', error);
       Alert.alert('Error', 'Failed to book ambulance');

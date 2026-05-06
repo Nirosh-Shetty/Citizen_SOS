@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { useAuth } from '../../context/AuthContext';
 import { usersAPI, appointmentsAPI } from '../../utils/api';
+import { storageService } from '../../utils/storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface Professional {
@@ -85,9 +86,17 @@ export default function BookAppointmentScreen() {
         timeSlot: selectedTime,
         reason: reason,
       };
-      await appointmentsAPI.bookAppointment(appointmentData);
+      const res = await appointmentsAPI.bookAppointment(appointmentData);
+      const saved = res?.data || appointmentData;
+      try {
+        await storageService.appendAppointment({
+          ...(saved || {}),
+          _id: saved?._id || `${Date.now()}`,
+          status: saved?.status || 'scheduled',
+        });
+      } catch {}
       Alert.alert('Success', 'Appointment booked successfully');
-      router.back();
+      router.push('/appointments');
     } catch (error) {
       console.error('Error booking appointment:', error);
       Alert.alert('Error', 'Failed to book appointment');
@@ -184,7 +193,7 @@ export default function BookAppointmentScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Reason for Visit</Text>
-          {/* TextInput for reason */}
+          {/* Reason input */}
           <Text style={styles.noteText}>Describe your symptoms or reason for visit</Text>
         </View>
 
